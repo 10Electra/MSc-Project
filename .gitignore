@@ -1,0 +1,106 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Conda environments
+.env/
+.venv/
+env/
+venv/
+*.conda
+*.env
+
+# VSCode settings
+.vscode/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Pytype
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Exclude model and data files
+models/
+*.pt
+*.pth
+*.h5
+*.ckpt
+*.onnx
+
+data/
+*.csv
+*.tsv
+*.json
+*.parquet
+*.zip
+*.tar.gz
+*.pkl
+*.npz
+*.npy
+
+# Logs and runtime files
+*.log
+*.out
+*.tmp
+*.temp
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope project
+.ropeproject
