@@ -1,5 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import open3d as o3d
+from trimesh import Trimesh
 
 def get_integer_segments(sp_regions):
     integer_segments = np.zeros([sp_regions.shape[1], sp_regions.shape[2]])
@@ -79,3 +81,18 @@ def triangulate_segments(verts, integer_segments):
                 aclock_quad_idx.reverse()
                 tris[sample_sp-1].append(aclock_quad_idx)
     return tris
+
+def o3d_to_trimesh(mesh: o3d.geometry.TriangleMesh) -> Trimesh:
+    trimesh_mesh = Trimesh(
+        vertices=np.asarray(mesh.vertices),
+        faces=np.asarray(mesh.triangles),
+        process=False)
+    return trimesh_mesh
+
+def trimesh_to_o3d(mesh: Trimesh) -> o3d.geometry.TriangleMesh:
+    o3d_mesh = o3d.geometry.TriangleMesh()
+    
+    o3d_mesh.vertices = o3d.utility.Vector3dVector(mesh.vertices)
+    o3d_mesh.triangles = o3d.utility.Vector3iVector(mesh.faces)
+    
+    return o3d_mesh
