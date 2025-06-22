@@ -49,7 +49,7 @@ def quadto2tris(idx: tuple, verts: np.ndarray) -> tuple[list[int], list[int]]:
 
 def triangulate_segments(verts, integer_segments):
     tris = [[] for _ in range(int(np.max(integer_segments))+1)]
-    H, W = 240, 320
+    H, W = integer_segments.shape[0], integer_segments.shape[1]
     for v in range(H - 1):
         for u in range(W - 1):
             id_tl = v * W + u
