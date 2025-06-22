@@ -1,5 +1,11 @@
 # Notes on the Project
 
+## To do
+
+- [ ] Implement a trilateral filter with projected normal distance, perpendicular radius, colour
+- [ ] Apply mean-shift clustering
+- [ ] Implement some triangulation
+
 ## Approach
 
 - Currently building segmented meshes from superprimitives; an alternative approach would be to cookie-cut (convex hull type method) superprimitives from complete environment mesh?
