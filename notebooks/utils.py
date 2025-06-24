@@ -200,7 +200,16 @@ def calc_local_sampling_spacing(
         return D[0], rho[0]
     return D, rho
 
-def find_cyl_neighbours(point, normal, local_sampling_spacing, alpha, points, tree):
+def find_cyl_neighbours(
+    point: np.ndarray,
+    normal: np.ndarray,
+    local_sampling_spacing: float,
+    h_alpha: float,
+    r_alpha: float,
+    points: np.ndarray,
+    tree: o3d.geometry.KDTreeFlann,
+    self_idx: int | None = None,          # pass index to avoid expensive test
+) -> np.ndarray:
     """
     Find neighbouring points within a cylindrical region around a point.
 
@@ -211,25 +220,68 @@ def find_cyl_neighbours(point, normal, local_sampling_spacing, alpha, points, tr
         alpha (float): Scaling factor for the cylinder; r = h/2 = alpha*LSS
         points (np.ndarray): All points in the cloud (N, 3).
         tree (o3d.geometry.KDTreeFlann): KDTree for the point cloud.
+        self_idx: id of the query point - removed from results if given
 
     Returns:
         np.ndarray: Indices of neighbouring points.
     """
-    r_c = alpha * local_sampling_spacing
-    h_half = alpha * local_sampling_spacing  # 0.5·h_c
-    r2 = r_c * r_c
-    h2 = h_half * h_half
-    R = math.sqrt(r2 + h2)
+    r_c     = r_alpha * local_sampling_spacing
+    h_half  = h_alpha * local_sampling_spacing         # ½ h_c
+    R       = math.hypot(r_c, h_half)                  # √(r²+h²)
 
     N, idx, d2 = tree.search_radius_vector_3d(point, R)
-    idx = np.asarray(idx, dtype=np.int32)
-    pts = points[idx]
+    idx  = np.asarray(idx, dtype=np.int32)
+    pts  = points[idx]
     diff = pts - point
 
-    h = np.abs(diff @ normal)                         # (N,)
-    rad2 = np.maximum(d2 - h * h, 0.0)               # (N,)
-    # Exclude the query point itself
-    mask = (h <= h_half) & (rad2 <= r2) & (idx != np.where((points == point).all(axis=1))[0][0])
+    h     = np.abs(diff @ normal)                      # axial distance
+    rad2  = np.maximum(d2 - h*h, 0.0)                  # radial²; clamp negatives
 
-    neighbour_idx = idx[mask]
-    return neighbour_idx
+    # Build mask in squared space; remove query point by index if given
+    mask  = (h <= h_half) & (rad2 <= r_c*r_c)
+    if self_idx is not None:
+        mask &= (idx != self_idx)
+
+    return idx[mask]
+
+
+def compute_overlap_set(
+    points:          np.ndarray,    # (N,3)
+    normals:         np.ndarray,    # (N,3)
+    local_spacing:   np.ndarray,    # (N,)
+    scan_ids:        np.ndarray,    # (N,)
+    h_alpha:           float,
+    r_alpha:           float,
+    tree:            o3d.geometry.KDTreeFlann,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Return:
+        overlap_idx: 1-D array of indices belonging to the overlap set
+        overlap_mask:   boolean mask of length N (True -> point in overlap set)
+    """
+    N = points.shape[0]
+    overlap_mask = np.zeros(N, dtype=bool)
+
+    for i in range(N):
+        if overlap_mask[i]: # already decided via a neighbour
+            continue
+
+        neighbour_idx = find_cyl_neighbours(
+            point   = points[i],
+            normal  = normals[i],
+            local_sampling_spacing = local_spacing[i],
+            h_alpha   = h_alpha,
+            r_alpha   = r_alpha,
+            points  = points,
+            tree    = tree,
+        )
+
+        if neighbour_idx.size == 0: # isolated point – cannot overlap
+            continue
+
+        if np.any(scan_ids[neighbour_idx] != scan_ids[i]):
+            overlap_mask[neighbour_idx] = True # whole cylinder
+            overlap_mask[i]       = True # include the seed itself
+
+    overlap_idx = np.nonzero(overlap_mask)[0]
+    return overlap_idx, overlap_mask
