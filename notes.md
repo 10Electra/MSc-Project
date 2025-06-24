@@ -12,6 +12,8 @@
 - Density-adaptivity might not be so important in this case as the meshes come from images with uniform resolution
 - We can use colour-based comparison instead
 - Illumination change MLP for lighting-related colour changes
+
+- Big debate - go for point-shifting or stitching? Compute budget sufficient for point-shifting?
   
 ### SurfelMeshing / Point-based fusion
 
@@ -21,3 +23,10 @@
 ## Useful libraries
 
 - pykdtree is possibly fastest for knn, but doesn't have fixed radius search
+
+## Implementation steps
+
+1. Get local sampling spacing using 25-nn
+2. Find neighbours within CYND defined by local sampling spacing
+3. Find the overlapping regions of the pointcloud using CYND neighbourhoods
+4. Use CYND to calculate normal shift for each point
