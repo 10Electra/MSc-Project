@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import open3d as o3d
 from trimesh import Trimesh
 from typing import Tuple, Union
+from scipy.spatial import cKDTree
 
 def get_integer_segments(sp_regions):
     integer_segments = np.zeros([sp_regions.shape[1], sp_regions.shape[2]])
@@ -203,13 +204,13 @@ def calc_local_spacing(
 def find_cyl_neighbours(
     point: np.ndarray,
     normal: np.ndarray,
-    local_sampling_spacing: float,
+    local_spacing: float,
     h_alpha: float,
     r_alpha: float,
     points: np.ndarray,
     tree: o3d.geometry.KDTreeFlann,
-    self_idx: int | None = None,          # pass index to avoid expensive test
-) -> np.ndarray:
+    self_idx: int | None = None,
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Find neighbouring points within a cylindrical region around a point.
 
@@ -223,26 +224,26 @@ def find_cyl_neighbours(
         self_idx: id of the query point - removed from results if given
 
     Returns:
-        np.ndarray: Indices of neighbouring points.
+        Tuple[np.ndarray, np.array]: Indices of neighbouring points.
     """
-    r_c     = r_alpha * local_sampling_spacing
-    h_half  = h_alpha * local_sampling_spacing         # ½ h_c
-    R       = math.hypot(r_c, h_half)                  # √(r²+h²)
+    r_c     = r_alpha * local_spacing
+    h_half  = h_alpha * local_spacing
+    R       = math.hypot(r_c, h_half)
 
     N, idx, d2 = tree.search_radius_vector_3d(point, R)
     idx  = np.asarray(idx, dtype=np.int32)
     pts  = points[idx]
     diff = pts - point
 
-    h     = np.abs(diff @ normal)                      # axial distance
-    rad2  = np.maximum(d2 - h*h, 0.0)                  # radial²; clamp negatives
+    h     = np.abs(diff @ normal)                      # axial dist
+    rad2  = np.maximum(d2 - h*h, 0.0)                  # radial dist^2; clamp negatives
 
     # Build mask in squared space; remove query point by index if given
     mask  = (h <= h_half) & (rad2 <= r_c*r_c)
     if self_idx is not None:
         mask &= (idx != self_idx)
 
-    return idx[mask]
+    return idx[mask], d2
 
 
 def compute_overlap_set(
@@ -266,10 +267,10 @@ def compute_overlap_set(
         if overlap_mask[i]: # already decided via a neighbour
             continue
 
-        neighbour_idx = find_cyl_neighbours(
+        neighbour_idx, _ = find_cyl_neighbours(
             point   = points[i],
             normal  = normals[i],
-            local_sampling_spacing = local_spacing[i],
+            local_spacing = local_spacing[i],
             h_alpha   = h_alpha,
             r_alpha   = r_alpha,
             points  = points,
@@ -300,17 +301,17 @@ def trilateral_shift(
     Returns: updated (N,3) point array after one trilateral-shift pass.
     """
 
-    new_pts   = points.copy()
+    new_pts = points.copy()
 
     for i in overlap_idx:
-        p     = points[i]
-        n     = normals[i]
-        Dpj   = local_spacing[i]
+        p = points[i]
+        n = normals[i]
+        Dpj = local_spacing[i]
 
-        nbr   = find_cyl_neighbours(
+        nbr, _ = find_cyl_neighbours(
                     point   = p,
                     normal  = n,
-                    local_sampling_spacing = Dpj,
+                    local_spacing = Dpj,
                     h_alpha = h_alpha,
                     r_alpha = r_alpha,
                     points  = points,
