@@ -145,7 +145,7 @@ def smooth_normals(points: np.ndarray,
 
     return normals
 
-def calc_local_sampling_spacing(
+def calc_local_spacing(
         query: np.ndarray,
         points: Union[o3d.geometry.PointCloud, np.ndarray],
         k: int = 25,
@@ -285,3 +285,76 @@ def compute_overlap_set(
 
     overlap_idx = np.nonzero(overlap_mask)[0]
     return overlap_idx, overlap_mask
+
+def trilateral_shift(
+    points:           np.ndarray,               # (N,3)
+    normals:          np.ndarray,               # (N,3)
+    local_spacing:    np.ndarray,               # (N,) local sampling spacing
+    local_density:    np.ndarray,               # (N,) local sampling density
+    overlap_idx:      np.ndarray,               # (L,) indices to be updated
+    tree:             o3d.geometry.KDTreeFlann, # open3d KD-tree
+    r_alpha: float = 2.0,
+    h_alpha: float = 2.0,
+) -> np.ndarray:
+    """
+    Returns: updated (N,3) point array after one trilateral-shift pass.
+    """
+
+    new_pts   = points.copy()
+
+    for i in overlap_idx:
+        p     = points[i]
+        n     = normals[i]
+        Dpj   = local_spacing[i]
+
+        nbr   = find_cyl_neighbours(
+                    point   = p,
+                    normal  = n,
+                    local_sampling_spacing = Dpj,
+                    h_alpha = h_alpha,
+                    r_alpha = r_alpha,
+                    points  = points,
+                    tree    = tree,
+                    self_idx= i
+                )
+
+        if nbr.size == 0:
+            continue
+
+        pts_nbr = points[nbr]               # (k,3)
+        diff    = pts_nbr - p                # vectors from p to neighbours
+        h_signed= diff @ n                   # signed axial offsets  (k,)
+        h_abs   = np.abs(h_signed)
+        r2      = np.square(diff).sum(axis=1) - h_abs*h_abs
+        r2      = np.maximum(r2, 0.0)
+        r_abs   = np.sqrt(r2)                # radial distance
+
+        sigma_r = r_alpha * Dpj
+        sigma_h = 2.0 * h_alpha * Dpj
+        w_domain = np.exp(-(r_abs**2) / (2*sigma_r**2))
+        w_range  = np.exp(-(h_abs**2) / (2*sigma_h**2))
+
+        rho_i   = local_density[i]
+        rho_nbr = local_density[nbr]
+        d_rho   = rho_i - rho_nbr           # sign irrelevant after square
+        sigma_rho = np.max(np.abs(d_rho)) + 1e-12
+        w_rho   = np.exp(-(d_rho**2) / (2*sigma_rho**2))
+        w       = w_domain * w_range * w_rho
+
+
+        w_sum = w.sum()
+        if w_sum < 1e-12:
+            continue
+
+        delta_h = (w @ h_signed) / w_sum   # minus sign pulls toward denser side
+        new_pts[i] = p + delta_h * n        # move along normal only
+
+    return new_pts
+
+def get_o3d_colours_from_trimesh(colours:np.ndarray) -> o3d.utility.Vector3dVector:
+    if colours.shape[1] == 4:
+        no_alpha = colours[:,:3]
+    else:
+        no_alpha = colours
+    
+    return o3d.utility.Vector3dVector((no_alpha / 255).astype('float64'))
