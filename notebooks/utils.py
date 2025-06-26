@@ -232,6 +232,7 @@ def find_cyl_neighbours(
 
     N, idx, d2 = tree.search_radius_vector_3d(point, R)
     idx  = np.asarray(idx, dtype=np.int32)
+    d2  = np.asarray(d2, dtype=np.float64)
     pts  = points[idx]
     diff = pts - point
 
@@ -243,7 +244,7 @@ def find_cyl_neighbours(
     if self_idx is not None:
         mask &= (idx != self_idx)
 
-    return idx[mask], d2
+    return idx[mask], d2[mask]
 
 
 def compute_overlap_set(
