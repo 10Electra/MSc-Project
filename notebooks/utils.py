@@ -85,10 +85,12 @@ def triangulate_segments(verts, integer_segments):
                 tris[sample_sp-1].append(aclock_quad_idx)
     return tris
 
-def o3d_to_trimesh(mesh: o3d.geometry.TriangleMesh) -> Trimesh:
+def o3d_to_trimesh(mesh: o3d.geometry.TriangleMesh, copy=False) -> Trimesh:
+    verts = np.asarray(mesh.vertices).copy() if copy else np.asarray(mesh.vertices)
+    faces = np.asarray(mesh.triangles).copy() if copy else np.asarray(mesh.triangles)
     trimesh_mesh = Trimesh(
-        vertices=np.asarray(mesh.vertices),
-        faces=np.asarray(mesh.triangles),
+        vertices=verts,
+        faces=faces,
         process=False)
     return trimesh_mesh
 
