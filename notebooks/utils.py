@@ -5,6 +5,8 @@ import open3d as o3d
 from trimesh import Trimesh
 from typing import Tuple, Union
 from scipy.spatial import cKDTree
+import copy
+from collections import deque, defaultdict
 
 def get_integer_segments(sp_regions):
     integer_segments = np.zeros([sp_regions.shape[1], sp_regions.shape[2]])
@@ -362,3 +364,101 @@ def get_o3d_colours_from_trimesh(colours:np.ndarray) -> o3d.utility.Vector3dVect
         no_alpha = colours
     
     return o3d.utility.Vector3dVector((no_alpha / 255).astype('float64'))
+
+def find_boundary_edges(triangles:np.ndarray):
+    """
+    Finds the boundary edges of some triangles
+        
+    Parameters:
+    triangles : array-like, shape (K, 3)
+        Array of triangles where each row contains 3 vertex indices
+        
+    Returns:
+    boundary_edges : ndarray, shape (N, 2)
+        Array of boundary edges where each row contains 2 vertex indices
+    """    
+    edges = np.vstack([
+        triangles[:, [0, 1]],
+        triangles[:, [1, 2]], 
+        triangles[:, [2, 0]]
+    ])
+    
+    # Sort vertices in each edge
+    edges = np.sort(edges, axis=1)
+    
+    # Find unique edges and their counts
+    unique_edges, counts = np.unique(edges, axis=0, return_counts=True)
+    
+    # Return edges that appear exactly once
+    return unique_edges[counts==1]
+
+def topological_trim(mesh: o3d.geometry.TriangleMesh,
+                     cut_edges: np.ndarray,
+                     keep_largest: bool = True) -> o3d.geometry.TriangleMesh:
+    """
+    Remove all faces that lie on the other side of one or more closed edge-loops.
+
+    Parameters
+    ----------
+    mesh         : open3d.geometry.TriangleMesh (watertight or open)
+    cut_edges    : (N,2) array of vertex indices that form one or more closed loops
+    keep_largest : keep only the component with the largest total area (True),
+                   otherwise return the whole list of outside components.
+
+    Returns
+    -------
+    o3d.geometry.TriangleMesh with unwanted triangles removed and vertices compacted.
+    """
+    tris = np.asarray(mesh.triangles)
+    # Build edge to tri dictionary
+    edge2tri = defaultdict(list)
+    for tidx, tri in enumerate(tris):
+        for e in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+            edge2tri[tuple(sorted(e))].append(tidx)
+
+    # Mark loop edges
+    cut = {tuple(sorted(e)) for e in cut_edges}
+
+    # Adjacency graph that ignores loop edges
+    neighbours: list[list] = [[] for _ in range(len(tris))]
+    for e, faces in edge2tri.items():
+        if e in cut or len(faces) != 2:
+            continue
+        a, b = faces
+        neighbours[a].append(b)
+        neighbours[b].append(a)
+
+    # Label connected components via BFS
+    comp = np.full(len(tris), -1, dtype=int)
+    curr = 0
+    for seed in range(len(tris)):
+        if comp[seed] != -1:
+            continue
+        q = deque([seed])
+        comp[seed] = curr
+        while q:
+            f = q.popleft()
+            for n in neighbours[f]:
+                if comp[n] == -1:
+                    comp[n] = curr
+                    q.append(n)
+        curr += 1
+
+    # Choose which components to keep
+    if keep_largest and curr > 1:
+        verts = np.asarray(mesh.vertices)[tris]
+        areas = 0.5 * np.linalg.norm(np.cross(verts[:, 1] - verts[:, 0],
+                                              verts[:, 2] - verts[:, 0]), axis=1)
+        comp_area = np.bincount(comp, weights=areas, minlength=curr)
+        keep_comp = np.argmax(comp_area)
+        tri_keep  = np.flatnonzero(comp == keep_comp)
+    else:
+        tri_keep = np.arange(len(tris))  # Keep all triangles
+
+    # Triangle ids to drop from the mesh
+    tri_drop = np.setdiff1d(np.arange(len(tris)), tri_keep, assume_unique=True)
+
+    out = copy.copy(mesh)
+    out.remove_triangles_by_index(tri_drop.tolist())
+    # out.remove_unreferenced_vertices()
+    return out
