@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import open3d as o3d
 from trimesh import Trimesh
 from typing import Tuple, Union
-from scipy.spatial import cKDTree
 import copy
 from collections import deque, defaultdict
 
