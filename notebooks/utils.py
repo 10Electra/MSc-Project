@@ -462,3 +462,92 @@ def topological_trim(mesh: o3d.geometry.TriangleMesh,
     out.remove_triangles_by_index(tri_drop.tolist())
     # out.remove_unreferenced_vertices()
     return out
+
+def merge_nearby_clusters(
+    trilat_shifted_pts: np.ndarray,
+    normals: np.ndarray,
+    colours: np.ndarray,
+    overlap_mask: np.ndarray,
+    global_avg_spacing: float,
+    h_alpha: float,
+    find_cyl_neighbours,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Merge nearby clusters of points in the overlap region.
+
+    Args:
+        points: (N, 3) array of original points.
+        trilat_shifted_pts: (N, 3) array of shifted points.
+        normals: (N, 3) array of normals.
+        colours: (N, C) array of colours.
+        overlap_mask: (N,) boolean array indicating overlap points.
+        global_avg_spacing: float, global average spacing.
+        h_alpha: float, parameter for find_cyl_neighbours.
+        find_cyl_neighbours: function to find cylindrical neighbours.
+
+    Returns:
+        cluster_mapping: (N,) array mapping each point to its cluster id or -1.
+        clustered_overlap_pnts: (K, 3) array of merged overlap points.
+        clustered_overlap_cols: (K, C) array of merged overlap colours.
+        clustered_overlap_nrms: (K, 3) array of merged overlap normals.
+    """
+    import open3d as o3d
+
+    overlap_idx = np.flatnonzero(overlap_mask)                            # (M,)
+    trilat_shifted_overlap_pts = trilat_shifted_pts[overlap_idx]          # (M, 3)
+    trilat_shifted_overlap_tree = o3d.geometry.KDTreeFlann(               # KD‑tree
+        trilat_shifted_overlap_pts.T)
+
+    delta = np.sqrt(2) / 2
+    sigma = delta * global_avg_spacing
+
+    cluster_mapping = -1 * np.ones(len(trilat_shifted_pts), dtype=int)
+
+    clustered_overlap_pnts: list = []
+    clustered_overlap_cols: list = []
+    clustered_overlap_nrms: list = []
+
+    while (cluster_mapping[overlap_idx] < 0).any():
+
+        free_local_idx = np.flatnonzero(cluster_mapping[overlap_idx] < 0)  # local indices
+        id_local = np.random.choice(free_local_idx)                      # local id in [0, M)
+
+        point  = trilat_shifted_overlap_pts[id_local]                    # (3,)
+        normal = normals[overlap_idx[id_local]]                          # (3,)
+
+        nbr_local, d2 = find_cyl_neighbours(
+            point,
+            normal,
+            global_avg_spacing,
+            h_alpha,
+            delta,
+            trilat_shifted_overlap_pts,
+            trilat_shifted_overlap_tree,
+            self_idx=None)
+
+        nbr_global = overlap_idx[nbr_local]
+
+        mask = cluster_mapping[nbr_global] < 0
+        nbr_global = nbr_global[mask]
+        d2 = d2[mask]
+
+        if len(nbr_global) == 0:
+            raise RuntimeError("Point neighbourhood is unexpectedly empty!")
+
+        w = np.exp(-d2 / (2 * sigma ** 2))
+        w /= w.sum()
+
+        merged_id = len(clustered_overlap_pnts)
+        cluster_mapping[nbr_global] = merged_id
+
+        clustered_overlap_pnts.append(w @ trilat_shifted_pts[nbr_global])
+        clustered_overlap_cols.append(w @ colours[nbr_global])
+
+        merged_nrm = w @ normals[nbr_global]
+        clustered_overlap_nrms.append(merged_nrm / np.linalg.norm(merged_nrm))
+
+    clustered_overlap_pnts_np = np.vstack(clustered_overlap_pnts)
+    clustered_overlap_cols_np = np.vstack(clustered_overlap_cols)
+    clustered_overlap_nrms_np = np.vstack(clustered_overlap_nrms)
+
+    return cluster_mapping, clustered_overlap_pnts_np, clustered_overlap_cols_np, clustered_overlap_nrms_np
