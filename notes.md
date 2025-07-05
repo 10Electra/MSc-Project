@@ -30,3 +30,9 @@
 2. Find neighbours within CYND defined by local sampling spacing
 3. Find the overlapping regions of the pointcloud using CYND neighbourhoods
 4. Use CYND to calculate normal shift for each point
+
+## Mesh completion effort
+
+### [BridgeShape: Latent Diffusion Schrödinger Bridge for 3D Shape Completion](https://arxiv.org/pdf/2506.23205v1)
+- Very fast
+- Requires fine-tuning of VQ-VAE
