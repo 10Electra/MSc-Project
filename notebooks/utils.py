@@ -13,8 +13,8 @@ def get_integer_segments(sp_regions):
         integer_segments[sp_regions[i,:,:]] = i + 1
     return integer_segments
 
-def plot_region_numbers(integer_segments:np.ndarray,text_size=8):
-    plt.figure(figsize=(10, 8))
+def plot_region_numbers(integer_segments:np.ndarray,text_size=8,figsize=(10,8)):
+    plt.figure(figsize=figsize)
     plt.imshow(integer_segments, cmap='nipy_spectral')
 
     # Calculate center of mass for each region and add text labels

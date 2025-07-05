@@ -1,7 +1,7 @@
 import numpy as np
 import open3d as o3d
 import trimesh
-from notebooks.utils import (
+from utils import (
     trimesh_to_o3d,
     smooth_normals,
     calc_local_spacing,
@@ -14,11 +14,15 @@ from notebooks.utils import (
     merge_nearby_clusters,
 )
 
-def main():
+def mesh_fusion(
+        fname_in_1:str='bottle_1.ply',
+        fname_in_2:str='bottle_2.ply',
+        fname_out='bottle_fused_tmp.ply'
+    ):
     ### Load meshes and extract data
-    mesh1 = trimesh.load_mesh('notebooks/meshes/bottle_1.ply')
-    mesh2 = trimesh.load_mesh('notebooks/meshes/bottle_2.ply')
-    fused_mesh_path = 'notebooks/meshes/bottle_fused.ply'
+    mesh1 = trimesh.load_mesh(f'meshes/{fname_in_1}')
+    mesh2 = trimesh.load_mesh(f'meshes/{fname_in_2}')
+    fused_mesh_path = f'meshes/{fname_out}'
 
     mesh1_o3d = trimesh_to_o3d(mesh1)
     mesh2_o3d = trimesh_to_o3d(mesh2)
@@ -116,10 +120,7 @@ def main():
     new_colours = np.concat([clustered_overlap_cols, colours[border_mask],            colours[nonoverlap_nonborder_mask]])
     new_normals = np.concat([clustered_overlap_nrms, normals[border_mask],            normals[nonoverlap_nonborder_mask]])
 
-    # Plot vertices and their classifications
-    overlap_idx_from = overlap_idx
-    overlap_idx_to   = np.array(range(n_overlap))
-
+    ### Complete mapping to include border and free vertices
     border_idx_from  = np.array(range(len(points)))[border_mask]
     border_idx_to    = np.array(range(n_border)) + n_overlap
 
@@ -190,4 +191,4 @@ def main():
     print(f"Fused mesh saved to {fused_mesh_path}")
 
 if __name__ == "__main__":
-    main()
+    mesh_fusion()
