@@ -86,21 +86,85 @@ def triangulate_segments(verts, integer_segments):
                 tris[sample_sp-1].append(aclock_quad_idx)
     return tris
 
-def o3d_to_trimesh(mesh: o3d.geometry.TriangleMesh, copy=False) -> Trimesh:
-    verts = np.asarray(mesh.vertices).copy() if copy else np.asarray(mesh.vertices)
-    faces = np.asarray(mesh.triangles).copy() if copy else np.asarray(mesh.triangles)
-    trimesh_mesh = Trimesh(
-        vertices=verts,
-        faces=faces,
-        process=False)
-    return trimesh_mesh
+def o3d_to_trimesh(mesh: o3d.geometry.TriangleMesh, copy: bool = False) -> Trimesh:
+    """Convert Open3D TriangleMesh -> Trimesh, preserving vertex colours.
 
-def trimesh_to_o3d(mesh: Trimesh) -> o3d.geometry.TriangleMesh:
+    Parameters
+    ----------
+    mesh : o3d.geometry.TriangleMesh
+        The source mesh.
+    copy : bool, default False
+        If True, numpy arrays are deep-copied; otherwise views are used.
+
+    Returns
+    -------
+    Trimesh
+        A Trimesh with vertices, faces and (if present) vertex colours.
+    """
+    verts = np.asarray(mesh.vertices)
+    faces = np.asarray(mesh.triangles)
+
+    if copy:
+        verts = verts.copy()
+        faces = faces.copy()
+
+    tm = Trimesh(vertices=verts, faces=faces, process=False)
+
+    # Copy across vertex colours
+    if mesh.has_vertex_colors():
+        # Open3D stores floats in [0,1]; Trimesh expects uint8 in [0,255]
+        cols = np.asarray(mesh.vertex_colors)
+        if copy:
+            cols = cols.copy()
+
+        if cols.max() <= 1.0:
+            cols = (cols * 255).astype(np.uint8)
+
+        # Ensure Trimesh's 4-channel RGBA
+        if cols.shape[1] == 3:
+            alpha = np.full((cols.shape[0], 1), 255, dtype=np.uint8)
+            cols = np.hstack([cols, alpha])
+
+        tm.visual.vertex_colors = cols
+
+    return tm
+
+def trimesh_to_o3d(mesh: Trimesh, copy: bool = False) -> o3d.geometry.TriangleMesh:
+    """Convert Trimesh -> Open3D TriangleMesh, preserving vertex colours.
+
+    Parameters
+    ----------
+    mesh : Trimesh
+        The source mesh.
+    copy : bool, default False
+        If True, numpy arrays are deep-copied before passing to Open3D.
+
+    Returns
+    -------
+    o3d.geometry.TriangleMesh
+        An Open3D mesh with vertices, faces and (if present) vertex colours.
+    """
+    verts = mesh.vertices.copy() if copy else mesh.vertices
+    faces = mesh.faces.copy()     if copy else mesh.faces
+
     o3d_mesh = o3d.geometry.TriangleMesh()
-    
-    o3d_mesh.vertices = o3d.utility.Vector3dVector(mesh.vertices)
-    o3d_mesh.triangles = o3d.utility.Vector3iVector(mesh.faces)
-    
+    o3d_mesh.vertices  = o3d.utility.Vector3dVector(verts)
+    o3d_mesh.triangles = o3d.utility.Vector3iVector(faces)
+
+    # Copy across vertex colours
+    if mesh.visual.kind == 'vertex' and mesh.visual.vertex_colors.size:
+        cols = mesh.visual.vertex_colors
+        if copy:
+            cols = cols.copy()
+
+        # Trimesh stores uint8 [0,255]; Open3D wants float [0,1] and RGB only
+        if cols.dtype == np.uint8:
+            cols = cols.astype(np.float64) / 255.0
+        if cols.shape[1] == 4:        # drop alpha channel for Open3D
+            cols = cols[:, :3]
+
+        o3d_mesh.vertex_colors = o3d.utility.Vector3dVector(cols)
+
     return o3d_mesh
 
 def smooth_normals(points: np.ndarray,

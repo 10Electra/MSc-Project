@@ -15,15 +15,10 @@ from utils import (
 )
 
 def mesh_fusion(
-        fname_in_1:str='bottle_1.ply',
-        fname_in_2:str='bottle_2.ply',
-        fname_out='bottle_fused_tmp.ply'
+        mesh1:trimesh.Trimesh,
+        mesh2:trimesh.Trimesh,
     ):
     ### Load meshes and extract data
-    mesh1 = trimesh.load_mesh(f'meshes/{fname_in_1}')
-    mesh2 = trimesh.load_mesh(f'meshes/{fname_in_2}')
-    fused_mesh_path = f'meshes/{fname_out}'
-
     mesh1_o3d = trimesh_to_o3d(mesh1)
     mesh2_o3d = trimesh_to_o3d(mesh2)
     points1 = np.asarray(mesh1.vertices)
@@ -186,9 +181,4 @@ def mesh_fusion(
 
     fused_mesh.compute_vertex_normals()
 
-    # o3d.visualization.draw_geometries([fused_mesh])
-    o3d.io.write_triangle_mesh(fused_mesh_path, fused_mesh)
-    print(f"Fused mesh saved to {fused_mesh_path}")
-
-if __name__ == "__main__":
-    mesh_fusion()
+    return fused_mesh
