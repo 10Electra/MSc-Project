@@ -29,7 +29,6 @@ def mesh_fusion(
     colours1 = mesh1.visual.vertex_colors
     colours2 = mesh2.visual.vertex_colors
     colours = np.concat([colours1, colours2])
-    # print('mesh_fusion colours:\n', colours)
 
     tree = o3d.geometry.KDTreeFlann(points.T)
 
@@ -49,7 +48,7 @@ def mesh_fusion(
     local_spacings = (local_spacing_1, local_spacing_2)
     local_spacing = np.concat(local_spacings)
 
-    local_density = np.concat((local_spacing_1, local_spacing_2))
+    local_density = np.concat((local_density_1, local_density_2))
 
     global_avg_spacing = (1/len(local_spacings)) * np.sum([(1/len(localspacing)) * np.sum(localspacing) for localspacing in local_spacings])
 
@@ -166,7 +165,6 @@ def mesh_fusion(
     )
 
     new_colours = np.clip(new_colours, 0, 255)
-    # print('fused_mesh new_colours:\n',new_colours)
     fused_mesh.vertex_colors = get_o3d_colours_from_trimesh(new_colours)
 
     fused_mesh.remove_unreferenced_vertices()
