@@ -6,6 +6,8 @@
 - [ ] Apply mean-shift clustering
 - [ ] Implement some triangulation
 
+- [ ] Implement mesh.merge_close_vertices(eps)?
+
 ## Approach
 
 - Currently building segmented meshes from superprimitives; an alternative approach would be to cookie-cut (convex hull type method) superprimitives from complete environment mesh?

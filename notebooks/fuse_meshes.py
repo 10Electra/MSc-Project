@@ -29,6 +29,7 @@ def mesh_fusion(
     colours1 = mesh1.visual.vertex_colors
     colours2 = mesh2.visual.vertex_colors
     colours = np.concat([colours1, colours2])
+    # print('mesh_fusion colours:\n', colours)
 
     tree = o3d.geometry.KDTreeFlann(points.T)
 
@@ -80,13 +81,6 @@ def mesh_fusion(
         h_alpha=h_alpha,
         find_cyl_neighbours=find_cyl_neighbours,
     )
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(clustered_overlap_pnts)
-    pcd.colors = get_o3d_colours_from_trimesh(200*np.ones_like(clustered_overlap_cols))
-
-    pcd2 = o3d.geometry.PointCloud()
-    pcd2.points = o3d.utility.Vector3dVector(points[cluster_mapping==-1])
-    pcd2.colors = get_o3d_colours_from_trimesh(100*np.zeros((len(points[cluster_mapping==-1]),4)))
 
     ### Classify vertices and create mapping
     tris1 = np.asarray(mesh1_o3d.triangles)
@@ -165,19 +159,21 @@ def mesh_fusion(
 
     trimmed_overlap_tris = np.asarray(trimmed_overlap_mesh.triangles)
     fused_mesh_triangles = np.concatenate([trimmed_overlap_tris, mapping[nonoverlap_tris]], axis=0)
+
     fused_mesh = o3d.geometry.TriangleMesh(
         vertices=o3d.utility.Vector3dVector(new_points),
         triangles=o3d.utility.Vector3iVector(fused_mesh_triangles)
     )
+
+    new_colours = np.clip(new_colours, 0, 255)
+    # print('fused_mesh new_colours:\n',new_colours)
+    fused_mesh.vertex_colors = get_o3d_colours_from_trimesh(new_colours)
 
     fused_mesh.remove_unreferenced_vertices()
     fused_mesh.remove_duplicated_triangles()
     fused_mesh.remove_duplicated_vertices()
     fused_mesh.remove_degenerate_triangles()
     fused_mesh.remove_non_manifold_edges()
-
-    new_colours = np.clip(new_colours, 0, 255)
-    fused_mesh.vertex_colors = get_o3d_colours_from_trimesh(new_colours)
 
     fused_mesh.compute_vertex_normals()
 
