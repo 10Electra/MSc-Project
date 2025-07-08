@@ -81,7 +81,8 @@ models/
 *.ckpt
 *.onnx
 
-data/
+data/kfs_moge_realsense
+data/kfs_moge_tum
 *.csv
 *.tsv
 *.json
