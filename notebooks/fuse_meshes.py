@@ -17,6 +17,7 @@ from utils import (
 def mesh_fusion(
         mesh1:trimesh.Trimesh,
         mesh2:trimesh.Trimesh,
+        h_alpha:float = 2.5,
     ):
     ### Load meshes and extract data
     mesh1_o3d = trimesh_to_o3d(mesh1)
@@ -53,7 +54,6 @@ def mesh_fusion(
     global_avg_spacing = (1/len(local_spacings)) * np.sum([(1/len(localspacing)) * np.sum(localspacing) for localspacing in local_spacings])
 
     ### Calculate overlapping region
-    h_alpha = 2.5
     r_alpha = 2
     overlap_idx, overlap_mask = compute_overlap_set(points, normals, local_spacing, scan_ids, h_alpha, r_alpha, tree)
 
