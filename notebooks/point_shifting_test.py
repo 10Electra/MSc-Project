@@ -4,7 +4,7 @@ import open3d as o3d
 from sklearn.cluster import MeanShift
 import trimesh
 from trimesh import Trimesh
-from utils import (
+from superprimitive_fusion.utils import (
     trimesh_to_o3d,
     o3d_to_trimesh,
     smooth_normals,

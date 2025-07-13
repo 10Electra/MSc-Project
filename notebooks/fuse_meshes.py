@@ -1,7 +1,7 @@
 import numpy as np
 import open3d as o3d
 import trimesh
-from utils import (
+from superprimitive_fusion.utils import (
     trimesh_to_o3d,
     smooth_normals,
     calc_local_spacing,
