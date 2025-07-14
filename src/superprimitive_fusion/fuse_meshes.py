@@ -1,5 +1,5 @@
 import numpy as np
-import open3d as o3d
+import open3d as o3d # type: ignore
 import trimesh
 from superprimitive_fusion.utils import (
     trimesh_to_o3d,
