@@ -1,0 +1,117 @@
+[Mesh fusion pipeline with better reuse of kd-trees]
+The total time taken was    1820.13 ms
+
+ Line  Time (ms)    Hits  Code
+------------------------------------------------------------
+  101    1021.65       5  trilat_shifted_pts = trilateral_shift(trilat_shifted_pts, normals, local_spacing, local_density, overlap_idx, kd_tree, r_alpha, h_alpha)
+   63     459.11       1  normals = smooth_normals(points, normals, tree=kd_tree, k=8, T=0.7, n_iters=5)
+  107     212.97       2  cluster_mapping, clustered_overlap_pnts, clustered_overlap_cols, clustered_overlap_nrms = merge_nearby_clusters(
+   82      27.90       2  overlap_idx, overlap_mask = compute_overlap_set(
+  215      23.25       2  trimmed_overlap_mesh = topological_trim(
+  195      22.00       2  overlap_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
+   68      16.34       1  local_spacing_1, local_density_1 = calc_local_spacing(points1, points1, tree=kd_tree)
+   69      15.58       1  local_spacing_2, local_density_2 = calc_local_spacing(points2, points2, tree=kd_tree)
+  102       7.21       5  kd_tree = o3d.geometry.KDTreeFlann(trilat_shifted_pts.T)
+  226       3.00       1  triangles=o3d.utility.Vector3iVector(fused_mesh_triangles),
+  235       2.14       1  fused_mesh.remove_non_manifold_edges()
+  202       1.98       1  overlap_mesh.remove_non_manifold_edges()
+   49       1.46       1  kd_tree = o3d.geometry.KDTreeFlann(points.T)
+   94       1.32       1  boundary_edges = find_boundary_edges(nonoverlap_tris)
+  200       0.76       1  overlap_mesh.remove_duplicated_triangles()
+  232       0.75       1  fused_mesh.remove_duplicated_triangles()
+  122       0.62       1  overlap_any_idx = np.unique(all_tris[tri_has_overlap_any])
+  233       0.37       1  fused_mesh.remove_duplicated_vertices()
+  199       0.37       1  overlap_mesh.remove_duplicated_vertices()
+   93       0.17       1  nonoverlap_tris = all_tris[~np.all(overlap_mask[all_tris], axis=1)]
+  121       0.12       1  tri_has_overlap_any = overlap_mask[all_tris].any(axis=1)
+   39       0.09       1  points1 = np.asarray(mesh1.vertices)
+   43       0.08       1  points = np.vstack(pointclouds)
+  236       0.07       1  fused_mesh.compute_vertex_normals()
+  203       0.06       1  overlap_mesh.compute_vertex_normals()
+   54       0.06       1  mesh1.compute_vertex_normals()
+   55       0.05       1  mesh2.compute_vertex_normals()
+  161       0.05       1  new_colours = np.clip(new_colours, 0, 1)
+   76       0.05       3  [(1 / len(ls)) * np.sum(ls) for ls in local_spacings]
+  231       0.04       1  fused_mesh.remove_unreferenced_vertices()
+  183       0.03       1  pcd.normals = o3d.utility.Vector3dVector(new_normals[:n_overlap])
+   61       0.03       3  scan_ids = np.concatenate([np.full(len(pts), i) for i, pts in enumerate(pointclouds)])
+  212       0.03       1  np.all(mapped_boundary_edges < len(overlap_mesh.vertices), axis=1)
+   47       0.02       1  colours = np.concatenate([colours1, colours2], axis=0)
+  147       0.02       1  colours[border_mask],
+  148       0.02       1  colours[nonoverlap_nonborder_mask],
+  155       0.02       1  normals[border_mask],
+  156       0.02       1  normals[nonoverlap_nonborder_mask],
+   75       0.02       2  global_avg_spacing = (1 / len(local_spacings)) * np.sum(
+   72       0.02       1  local_spacing = np.concatenate(local_spacings)
+  139       0.02       1  trilat_shifted_pts[border_mask],
+  140       0.02       1  trilat_shifted_pts[nonoverlap_nonborder_mask],
+   59       0.02       1  normals = np.concatenate([normals1, normals2], axis=0)
+  180       0.02       1  pcd.points = o3d.utility.Vector3dVector(new_points[:n_overlap])
+  224       0.01       2  fused_mesh = o3d.geometry.TriangleMesh(
+   90       0.01       1  tris2 = np.asarray(mesh2.triangles) + len(points1)  # shift indices
+  125       0.01       1  border_mask[overlap_any_idx] = True
+  126       0.01       1  border_mask[cluster_mapping != -1] = False
+  201       0.01       1  overlap_mesh.remove_degenerate_triangles()
+  166       0.01       1  border_idx_from = np.arange(len(points))[border_mask]
+  220       0.01       2  fused_mesh_triangles = np.concatenate(
+   91       0.01       1  all_tris = np.concatenate([tris1, tris2], axis=0)
+  221       0.01       1  [trimmed_overlap_tris, mapping[nonoverlap_tris]], axis=0
+  229       0.01       1  fused_mesh.vertex_colors = o3d.utility.Vector3dVector(new_colours)
+  129       0.01       1  nonoverlap_nonborder_mask[cluster_mapping == -1] = True
+  234       0.01       1  fused_mesh.remove_degenerate_triangles()
+   89       0.01       1  tris1 = np.asarray(mesh1.triangles)
+  169       0.01       1  free_idx_from = np.arange(len(points))[nonoverlap_nonborder_mask]
+  193       0.01       1  radii = o3d.utility.DoubleVector([ball_r, ball_r * 1.5])
+  205       0.01       1  overlap_mesh.vertex_colors = pcd.colors
+  210       0.01       1  mapped_boundary_edges = mapping[boundary_edges]
+  211       0.01       2  relevant_boundary_edges = mapped_boundary_edges[
+  225       0.01       1  vertices=o3d.utility.Vector3dVector(new_points),
+  133       0.01       1  n_border = border_mask.sum()
+  136       0.01       2  new_points = np.concatenate(
+  144       0.01       2  new_colours = np.concatenate(
+   99       0.00       1  trilat_shifted_pts = points.copy()
+  130       0.00       1  nonoverlap_nonborder_mask[border_mask] = False
+  152       0.00       2  new_normals = np.concatenate(
+  167       0.00       1  border_idx_to = np.arange(n_border) + n_overlap
+  179       0.00       1  pcd = o3d.geometry.PointCloud()
+  219       0.00       1  trimmed_overlap_tris = np.asarray(trimmed_overlap_mesh.triangles)
+   40       0.00       1  points2 = np.asarray(mesh2.vertices)
+   45       0.00       1  colours1 = mesh1.vertex_colors
+   57       0.00       1  normals1 = np.asarray(mesh1.vertex_normals)
+   73       0.00       1  local_density = np.concatenate((local_density_1, local_density_2))
+  170       0.00       1  free_idx_to = np.arange(n_free) + n_overlap + n_border
+  238       0.00       1  return fused_mesh
+   46       0.00       1  colours2 = mesh2.vertex_colors
+   58       0.00       1  normals2 = np.asarray(mesh2.vertex_normals)
+  100       0.00       6  for _ in range(5):
+  134       0.00       1  n_free = nonoverlap_nonborder_mask.sum()
+  109       0.00       1  normals=normals,
+  124       0.00       1  border_mask = np.zeros(len(points), dtype=bool)
+  132       0.00       1  n_overlap = len(clustered_overlap_pnts)
+  172       0.00       1  mapping = cluster_mapping.copy()
+  192       0.00       1  ball_r = 1.1 * global_avg_spacing
+  216       0.00       1  overlap_mesh, relevant_boundary_edges
+   42       0.00       1  pointclouds = (points1, points2)
+   70       0.00       1  local_spacings = (local_spacing_1, local_spacing_2)
+   83       0.00       1  points, normals, local_spacing, scan_ids, h_alpha, r_alpha, kd_tree
+  108       0.00       1  trilat_shifted_pts=trilat_shifted_pts,
+  110       0.00       1  colours=colours,
+  111       0.00       1  overlap_mask=overlap_mask,
+  112       0.00       1  overlap_idx=overlap_idx,
+  113       0.00       1  global_avg_spacing=global_avg_spacing,
+  114       0.00       1  h_alpha=h_alpha,
+  115       0.00       1  tree=kd_tree,
+  128       0.00       1  nonoverlap_nonborder_mask = np.zeros(len(points), dtype=bool)
+  137       0.00       1  [
+  138       0.00       1  clustered_overlap_pnts,
+  142       0.00       1  axis=0,
+  145       0.00       1  [
+  146       0.00       1  clustered_overlap_cols,
+  150       0.00       1  axis=0,
+  153       0.00       1  [
+  154       0.00       1  clustered_overlap_nrms,
+  158       0.00       1  axis=0,
+  173       0.00       1  mapping[border_idx_from] = border_idx_to
+  174       0.00       1  mapping[free_idx_from] = free_idx_to
+  182       0.00       1  if new_normals[:n_overlap] is not None:
+  196       0.00       1  pcd, radii

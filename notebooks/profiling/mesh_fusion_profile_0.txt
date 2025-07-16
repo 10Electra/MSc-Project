@@ -1,4 +1,5 @@
-[Mesh fusion pipeline before adjustments or optimisations]Hot lines in src/superprimitive_fusion/mesh_fusion.py · function fuse_meshes
+[Mesh fusion pipeline before adjustments or optimisations]
+The total time taken was    1788.71 ms
 
  Line  Time (ms)    Hits  Code
 ------------------------------------------------------------
