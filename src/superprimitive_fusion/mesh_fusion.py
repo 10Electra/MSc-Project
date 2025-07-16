@@ -98,8 +98,9 @@ def fuse_meshes(
     # ---------------------------------------------------------------------
     trilat_shifted_pts = points.copy()
     for _ in range(5):
-        trilat_shifted_pts = trilateral_shift(trilat_shifted_pts,normals,local_spacing,local_density,overlap_idx,kd_tree,r_alpha,h_alpha)
-
+        trilat_shifted_pts = trilateral_shift(trilat_shifted_pts, normals, local_spacing, local_density, overlap_idx, kd_tree, r_alpha, h_alpha)
+        kd_tree = o3d.geometry.KDTreeFlann(trilat_shifted_pts.T)
+    
     # ---------------------------------------------------------------------
     # Merge nearby clusters
     # ---------------------------------------------------------------------
@@ -108,9 +109,10 @@ def fuse_meshes(
         normals=normals,
         colours=colours,
         overlap_mask=overlap_mask,
+        overlap_idx=overlap_idx,
         global_avg_spacing=global_avg_spacing,
         h_alpha=h_alpha,
-        find_cyl_neighbours=find_cyl_neighbours,
+        tree=kd_tree,
     )
 
     # ---------------------------------------------------------------------
@@ -240,6 +242,6 @@ if __name__ == "__main__":
     mesh1 = o3d.io.read_triangle_mesh("./notebooks/meshes/bottle_1.ply")
     mesh2 = o3d.io.read_triangle_mesh("./notebooks/meshes/bottle_2.ply")
 
-    fused_mesh = fuse_meshes(mesh1, mesh2, h_alpha=2.5)
+    fused_mesh = fuse_meshes(mesh1, mesh2, h_alpha=3)
     
-    # o3d.visualization.draw_geometries([fused_mesh])
+    o3d.visualization.draw_geometries([fused_mesh])
