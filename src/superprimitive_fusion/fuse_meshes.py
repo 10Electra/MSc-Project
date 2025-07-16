@@ -12,6 +12,9 @@ from superprimitive_fusion.mesh_fusion_utils import (
     merge_nearby_clusters,
 )
 
+from line_profiler import profile
+
+@profile
 def mesh_fusion(
     mesh1: o3d.geometry.TriangleMesh,
     mesh2: o3d.geometry.TriangleMesh,
@@ -239,4 +242,4 @@ if __name__ == "__main__":
 
     fused_mesh = mesh_fusion(mesh1, mesh2, h_alpha=2.5)
     
-    o3d.visualization.draw_geometries([fused_mesh])
+    # o3d.visualization.draw_geometries([fused_mesh])
