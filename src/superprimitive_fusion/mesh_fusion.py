@@ -46,7 +46,7 @@ def fuse_meshes(
     colours2 = mesh2.vertex_colors
     colours = np.concatenate([colours1, colours2], axis=0)
 
-    tree = o3d.geometry.KDTreeFlann(points.T)
+    kd_tree = o3d.geometry.KDTreeFlann(points.T)
 
     # ---------------------------------------------------------------------
     # Normals
@@ -60,13 +60,13 @@ def fuse_meshes(
 
     scan_ids = np.concatenate([np.full(len(pts), i) for i, pts in enumerate(pointclouds)])
 
-    normals = smooth_normals(points, normals, k=8, T=0.7, n_iters=5)
+    normals = smooth_normals(points, normals, tree=kd_tree, k=8, T=0.7, n_iters=5)
 
     # ---------------------------------------------------------------------
     # Local geometric properties
     # ---------------------------------------------------------------------
-    local_spacing_1, local_density_1 = calc_local_spacing(points1, points1)
-    local_spacing_2, local_density_2 = calc_local_spacing(points2, points2)
+    local_spacing_1, local_density_1 = calc_local_spacing(points1, points1, tree=kd_tree)
+    local_spacing_2, local_density_2 = calc_local_spacing(points2, points2, tree=kd_tree)
     local_spacings = (local_spacing_1, local_spacing_2)
 
     local_spacing = np.concatenate(local_spacings)
@@ -80,7 +80,7 @@ def fuse_meshes(
     # Overlap detection
     # ---------------------------------------------------------------------
     overlap_idx, overlap_mask = compute_overlap_set(
-        points, normals, local_spacing, scan_ids, h_alpha, r_alpha, tree
+        points, normals, local_spacing, scan_ids, h_alpha, r_alpha, kd_tree
     )
 
     # ---------------------------------------------------------------------
@@ -98,7 +98,7 @@ def fuse_meshes(
     # ---------------------------------------------------------------------
     trilat_shifted_pts = points.copy()
     for _ in range(5):
-        trilat_shifted_pts = trilateral_shift(trilat_shifted_pts,normals,local_spacing,local_density,overlap_idx,tree,r_alpha,h_alpha)
+        trilat_shifted_pts = trilateral_shift(trilat_shifted_pts,normals,local_spacing,local_density,overlap_idx,kd_tree,r_alpha,h_alpha)
 
     # ---------------------------------------------------------------------
     # Merge nearby clusters
