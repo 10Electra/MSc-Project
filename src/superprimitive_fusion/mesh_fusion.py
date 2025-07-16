@@ -15,7 +15,7 @@ from superprimitive_fusion.mesh_fusion_utils import (
 from line_profiler import profile
 
 @profile
-def mesh_fusion(
+def fuse_meshes(
     mesh1: o3d.geometry.TriangleMesh,
     mesh2: o3d.geometry.TriangleMesh,
     h_alpha: float = 2.5,
@@ -240,6 +240,6 @@ if __name__ == "__main__":
     mesh1 = o3d.io.read_triangle_mesh("./notebooks/meshes/bottle_1.ply")
     mesh2 = o3d.io.read_triangle_mesh("./notebooks/meshes/bottle_2.ply")
 
-    fused_mesh = mesh_fusion(mesh1, mesh2, h_alpha=2.5)
+    fused_mesh = fuse_meshes(mesh1, mesh2, h_alpha=2.5)
     
     # o3d.visualization.draw_geometries([fused_mesh])
