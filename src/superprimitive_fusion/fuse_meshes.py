@@ -1,14 +1,17 @@
 import numpy as np
 import open3d as o3d # type: ignore
 import trimesh
+
 from superprimitive_fusion.utils import (
     trimesh_to_o3d,
+    get_o3d_colours_from_trimesh,
+)
+from superprimitive_fusion.mesh_fusion_utils import (
     smooth_normals,
     calc_local_spacing,
     find_cyl_neighbours,
     compute_overlap_set,
     trilateral_shift,
-    get_o3d_colours_from_trimesh,
     find_boundary_edges,
     topological_trim,
     merge_nearby_clusters,
@@ -176,3 +179,11 @@ def mesh_fusion(
     fused_mesh.compute_vertex_normals()
 
     return fused_mesh
+
+if __name__ == '__main__':
+    mesh1 = trimesh.load('./notebooks/meshes/bottle_1.ply', process=False)
+    mesh2 = trimesh.load('./notebooks/meshes/bottle_2.ply', process=False)
+    
+    fused_mesh = mesh_fusion(mesh1, mesh2, h_alpha=2.5)
+    
+    # o3d.visualization.draw_geometries([fused_mesh])
