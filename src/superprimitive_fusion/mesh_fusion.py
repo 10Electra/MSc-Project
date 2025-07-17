@@ -4,9 +4,9 @@ import open3d as o3d  # type: ignore
 from superprimitive_fusion.mesh_fusion_utils import (
     smooth_normals,
     calc_local_spacing,
-    find_cyl_neighbours,
-    compute_overlap_set,
-    trilateral_shift,
+    compute_overlap_set_cached,
+    precompute_cyl_neighbours,
+    trilateral_shift_cached,
     find_boundary_edges,
     topological_trim,
     merge_nearby_clusters,
@@ -20,6 +20,8 @@ def fuse_meshes(
     mesh2: o3d.geometry.TriangleMesh,
     h_alpha: float = 2.5,
     r_alpha: float = 2.0,
+    trilat_iters: int = 2,
+    nrm_smth_iters: int = 1,
 ) -> o3d.geometry.TriangleMesh:
     """Fuses two registered open3d triangle meshes.
 
@@ -60,7 +62,7 @@ def fuse_meshes(
 
     scan_ids = np.concatenate([np.full(len(pts), i) for i, pts in enumerate(pointclouds)])
 
-    normals = smooth_normals(points, normals, tree=kd_tree, k=8, T=0.7, n_iters=5)
+    normals = smooth_normals(points, normals, tree=kd_tree, k=8, T=0.7, n_iters=nrm_smth_iters)
 
     # ---------------------------------------------------------------------
     # Local geometric properties
@@ -79,9 +81,9 @@ def fuse_meshes(
     # ---------------------------------------------------------------------
     # Overlap detection
     # ---------------------------------------------------------------------
-    overlap_idx, overlap_mask = compute_overlap_set(
-        points, normals, local_spacing, scan_ids, h_alpha, r_alpha, kd_tree
-    )
+    nbr_cache = precompute_cyl_neighbours(points, normals, local_spacing, r_alpha, h_alpha, kd_tree)
+
+    overlap_idx, overlap_mask = compute_overlap_set_cached(points, scan_ids, nbr_cache)
 
     # ---------------------------------------------------------------------
     # Find overlap boundary edges
@@ -97,8 +99,8 @@ def fuse_meshes(
     # Trilateral point shifting
     # ---------------------------------------------------------------------
     trilat_shifted_pts = points.copy()
-    for _ in range(5):
-        trilat_shifted_pts = trilateral_shift(trilat_shifted_pts, normals, local_spacing, local_density, overlap_idx, kd_tree, r_alpha, h_alpha)
+    for _ in range(trilat_iters):
+        trilat_shifted_pts = trilateral_shift_cached(trilat_shifted_pts, normals, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha)
         kd_tree = o3d.geometry.KDTreeFlann(trilat_shifted_pts.T)
     
     # ---------------------------------------------------------------------
@@ -244,4 +246,4 @@ if __name__ == "__main__":
 
     fused_mesh = fuse_meshes(mesh1, mesh2, h_alpha=3)
     
-    o3d.visualization.draw_geometries([fused_mesh])
+    # o3d.visualization.draw_geometries([fused_mesh])

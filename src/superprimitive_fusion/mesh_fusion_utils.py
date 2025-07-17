@@ -1,9 +1,6 @@
 import math
 import numpy as np
-import cv2 as cv
-import matplotlib.pyplot as plt
 import open3d as o3d # type: ignore
-from trimesh import Trimesh
 from typing import Tuple, Union
 import copy
 from collections import deque, defaultdict
@@ -158,6 +155,18 @@ def find_cyl_neighbours(
     return idx[mask], d2[mask]
 
 
+def precompute_cyl_neighbours(
+        points, normals, local_spacing,
+        r_alpha, h_alpha, tree):
+    """Returns list[ndarray] of neighbour indices for every point."""
+    nbr_lists = []
+
+    for i, (pnt, nrm, l_sp) in enumerate(zip(points, normals, local_spacing)):
+        idx, _ = find_cyl_neighbours(pnt, nrm, l_sp, h_alpha, r_alpha, points, tree, i)
+        nbr_lists.append(np.asarray(idx[1:], dtype=np.int32))  # drop self
+    return nbr_lists
+
+
 def compute_overlap_set(
     points:          np.ndarray,    # (N,3)
     normals:         np.ndarray,    # (N,3)
@@ -188,6 +197,36 @@ def compute_overlap_set(
             points  = points,
             tree    = tree,
         )
+
+        if neighbour_idx.size == 0: # isolated point – cannot overlap
+            continue
+
+        if np.any(scan_ids[neighbour_idx] != scan_ids[i]):
+            overlap_mask[neighbour_idx] = True # whole cylinder
+            overlap_mask[i]       = True # include the seed itself
+
+    overlap_idx = np.nonzero(overlap_mask)[0]
+    return overlap_idx, overlap_mask
+
+
+def compute_overlap_set_cached(
+    points:         np.ndarray,         # (N,3)
+    scan_ids:       np.ndarray,         # (N,)
+    nbr_cache:      list[np.ndarray]    # (N,K)
+    ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Return:
+        overlap_idx: 1-D array of indices belonging to the overlap set
+        overlap_mask:   boolean mask of length N (True -> point in overlap set)
+    """
+    N = points.shape[0]
+    overlap_mask = np.zeros(N, dtype=bool)
+
+    for i in range(N):
+        if overlap_mask[i]: # already decided via a neighbour
+            continue
+
+        neighbour_idx = nbr_cache[i]
 
         if neighbour_idx.size == 0: # isolated point – cannot overlap
             continue
@@ -261,6 +300,63 @@ def trilateral_shift(
             continue
 
         delta_h = (w @ h_signed) / w_sum   # minus sign pulls toward denser side
+        new_pts[i] = p + delta_h * n        # move along normal only
+
+    return new_pts
+
+
+def trilateral_shift_cached(
+    points:         np.ndarray,                 # (N,3)
+    normals:        np.ndarray,                 # (N,3)
+    local_spacing:  np.ndarray,                 # (N,) local sampling spacing
+    local_density:  np.ndarray,                 # (N,) local sampling density
+    overlap_idx:    np.ndarray,                 # (L,) indices to be updated
+    nbr_cache:      list[np.ndarray],           # (N,K)
+    r_alpha: float = 2.0,
+    h_alpha: float = 2.0,
+) -> np.ndarray:
+    """
+    Returns: updated (N,3) point array after one trilateral-shift pass.
+    """
+
+    new_pts = points.copy()
+
+    for i in overlap_idx:
+        p = points[i]
+        n = normals[i]
+        Dpj = local_spacing[i]
+
+        nbr = nbr_cache[i]
+
+        if nbr.size == 0:
+            continue
+
+        pts_nbr = points[nbr]               # (k,3)
+        diff    = pts_nbr - p               # vectors from p to neighbours
+        h_signed= diff @ n                  # signed axial offsets  (k,)
+        h_abs   = np.abs(h_signed)
+        r2      = np.square(diff).sum(axis=1) - h_abs*h_abs
+        r2      = np.maximum(r2, 0.0)
+        r_abs   = np.sqrt(r2)               # radial distance
+
+        sigma_r = r_alpha * Dpj
+        sigma_h = 2.0 * h_alpha * Dpj
+        w_domain = np.exp(-(r_abs**2) / (2*sigma_r**2))
+        w_range  = np.exp(-(h_abs**2) / (2*sigma_h**2))
+
+        rho_i   = local_density[i]
+        rho_nbr = local_density[nbr]
+        d_rho   = rho_i - rho_nbr           # sign irrelevant after square
+        sigma_rho = np.max(np.abs(d_rho)) + 1e-12
+        w_rho   = np.exp(-(d_rho**2) / (2*sigma_rho**2))
+        w       = w_domain * w_range * w_rho
+
+
+        w_sum = w.sum()
+        if w_sum < 1e-12:
+            continue
+
+        delta_h = (w @ h_signed) / w_sum    # minus sign pulls toward denser side
         new_pts[i] = p + delta_h * n        # move along normal only
 
     return new_pts
