@@ -22,6 +22,7 @@ def fuse_meshes(
     r_alpha: float = 2.0,
     trilat_iters: int = 2,
     nrm_smth_iters: int = 1,
+    shift_all: bool = False,
 ) -> o3d.geometry.TriangleMesh:
     """Fuses two registered open3d triangle meshes.
 
@@ -100,7 +101,7 @@ def fuse_meshes(
     # ---------------------------------------------------------------------
     trilat_shifted_pts = points.copy()
     for _ in range(trilat_iters):
-        trilat_shifted_pts = trilateral_shift_cached(trilat_shifted_pts, normals, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha)
+        trilat_shifted_pts = trilateral_shift_cached(trilat_shifted_pts, normals, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, shift_all)
         kd_tree = o3d.geometry.KDTreeFlann(trilat_shifted_pts.T)
     
     # ---------------------------------------------------------------------

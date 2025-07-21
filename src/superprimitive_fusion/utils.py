@@ -1,4 +1,5 @@
 import numpy as np
+from math import sin, cos, pi
 import cv2 as cv
 import matplotlib.pyplot as plt
 import open3d as o3d  # type: ignore
@@ -356,3 +357,52 @@ def show_anns(anns, borders=True):
             cv2.drawContours(img, contours, -1, (0, 0, 1, 0.4), thickness=1) 
 
     ax.imshow(img)
+
+def bake_uv_to_vertex_colours(mesh: o3d.geometry.TriangleMesh) -> None:
+    """
+    Bake the first texture into per-vertex RGB colours in place.
+    """
+    if not (mesh.has_textures() and mesh.has_triangle_uvs()):
+        print("No texture / UVs found; skipping bake")
+        return
+
+    # Texture
+    tex = np.asarray(mesh.textures[0])
+    if tex.dtype != np.float32:                 # convert only once
+        tex = tex.astype(np.float32) / 255.0
+
+    H, W, _ = tex.shape
+
+    # Geometry
+    tris = np.asarray(mesh.triangles)                   # (F, 3)
+    uvs  = np.asarray(mesh.triangle_uvs).reshape(-1, 2) # (F*3, 2)
+
+    colours = np.zeros((len(mesh.vertices), 3), dtype=np.float64)
+    counts  = np.zeros(len(mesh.vertices), dtype=np.int32)
+
+    for fi, (v0, v1, v2) in enumerate(tris):
+        # Three (u,v) for this face
+        tri_uv = uvs[3 * fi : 3 * fi + 3]
+
+        # Wrap and convert to pixel indices (no extra flip)
+        tri_uv = tri_uv % 1.0
+        xs = np.clip(np.round(tri_uv[:, 0] * (W - 1)).astype(int), 0, W - 1)
+        ys = np.clip(np.round(tri_uv[:, 1] * (H - 1)).astype(int), 0, H - 1)
+
+        c0, c1, c2 = tex[ys, xs, :3] # RGB only
+        for vidx, col in zip((v0, v1, v2), (c0, c1, c2)):
+            colours[vidx] += col
+            counts[vidx]  += 1
+
+    # Average and assign
+    counts[counts == 0] = 1
+    mesh.vertex_colors = o3d.utility.Vector3dVector(colours / counts[:, None])
+
+def polar2cartesian(r, lat, long, unit='deg'):
+    if unit == 'deg':
+        lat = (lat / 360) * 2 * pi
+        long = (long / 360) * 2 * pi
+    x = r * sin(lat) * cos(long)
+    y = r * sin(lat) * sin(long)
+    z = r * cos(lat)
+    return (x, y, z)

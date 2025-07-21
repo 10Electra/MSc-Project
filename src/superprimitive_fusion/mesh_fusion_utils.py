@@ -314,6 +314,7 @@ def trilateral_shift_cached(
     nbr_cache:      list[np.ndarray],           # (N,K)
     r_alpha: float = 2.0,
     h_alpha: float = 2.0,
+    shift_all: bool = False,                    # All pts or just overlap
 ) -> np.ndarray:
     """
     Returns: updated (N,3) point array after one trilateral-shift pass.
@@ -321,7 +322,9 @@ def trilateral_shift_cached(
 
     new_pts = points.copy()
 
-    for i in overlap_idx:
+    shift_idx = overlap_idx if not shift_all else range(len(points))
+
+    for i in shift_idx:
         p = points[i]
         n = normals[i]
         Dpj = local_spacing[i]
