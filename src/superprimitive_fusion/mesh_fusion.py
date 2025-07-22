@@ -13,6 +13,19 @@ from superprimitive_fusion.mesh_fusion_utils import (
 )
 
 from line_profiler import profile
+def flip_if_inwards(mesh: o3d.geometry.TriangleMesh):
+    mesh.compute_triangle_normals()
+    c_mesh   = mesh.get_center()
+    tris     = np.asarray(mesh.triangles)
+    verts    = np.asarray(mesh.vertices)
+    tri_ctr  = verts[tris].mean(axis=1)              # (F,3)
+    tri_norm = np.asarray(mesh.triangle_normals)     # (F,3)
+    score    = np.sum((tri_ctr - c_mesh) * tri_norm) # signed “flux”
+
+    if score < 0:                                    # pointing inside
+        mesh.triangles = o3d.utility.Vector3iVector(tris[:, [0, 2, 1]])
+        mesh.compute_vertex_normals()
+    return mesh
 
 @profile
 def fuse_meshes(
@@ -102,7 +115,6 @@ def fuse_meshes(
     trilat_shifted_pts = points.copy()
     for _ in range(trilat_iters):
         trilat_shifted_pts = trilateral_shift_cached(trilat_shifted_pts, normals, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, shift_all)
-        kd_tree = o3d.geometry.KDTreeFlann(trilat_shifted_pts.T)
     
     # ---------------------------------------------------------------------
     # Merge nearby clusters
@@ -192,8 +204,8 @@ def fuse_meshes(
         )
         pcd.orient_normals_consistent_tangent_plane(k=30)
 
-    ball_r = 1.1 * global_avg_spacing
-    radii = o3d.utility.DoubleVector([ball_r, ball_r * 1.5])
+    r_min = 1 * global_avg_spacing
+    radii = o3d.utility.DoubleVector(np.geomspace(r_min, r_min*4, num=5))
 
     overlap_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
         pcd, radii
@@ -230,6 +242,13 @@ def fuse_meshes(
     )
 
     fused_mesh.vertex_colors = o3d.utility.Vector3dVector(new_colours)
+
+    fused_mesh_t = o3d.t.geometry.TriangleMesh.from_legacy(fused_mesh)
+    fused_mesh_filled_t = fused_mesh_t.fill_holes(hole_size=r_min*10)
+    fused_mesh = fused_mesh_filled_t.to_legacy()
+    
+    fused_mesh.orient_triangles()
+    fused_mesh = flip_if_inwards(fused_mesh)
 
     fused_mesh.remove_unreferenced_vertices()
     fused_mesh.remove_duplicated_triangles()
