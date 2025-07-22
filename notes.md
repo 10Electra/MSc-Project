@@ -55,3 +55,40 @@
 - GNNs to improve/guide explicit mesh fusion
 
 ### Multi-scale / hierarchical fusion
+...
+
+## Final implementation goals
+- Averaging: weighting all the averages by 'age'
+
+- Fast nearest neighbour's search using pixel correspondences
+
+- Adaptive merging
+    - Reduce vertex density where not needed based on curvature
+    - Use before or after fusion?
+    - Use only for the fusion zone?
+
+- Experiment with more complex objects
+  - Scanner which trims more intelligently
+  - Fusion that works with 'islands'
+
+- Make faster
+  - Tensor-based approach?
+  - Stitching approach?
+
+- ~~Retexturing post fusion~~
+  - Wouldn't work on real data
+
+## Overall algorithm
+
+1. Extract attributes from input mesh (points, colour, ...)
+2. Compute and smooth vertex normals
+3. Calculate local spacing and density throughout the meshes
+4. Precompute neighbours within cylindrical neighbourhoods
+5. Find overlapping regions
+6. Shift overlapping vertices along individual normal directions
+7. Merge nearby clusters in overlapping region
+8. Book-keeping: create a mapping between old vertices and new merged vertices (and their attributes)
+9. Triangulate the overlap region
+10. Trim the overlap mesh to the overlap boundary
+11. Concatenate the overlap mesh with the retained non-overlapping meshes
+12. Fill holes and clean mesh
