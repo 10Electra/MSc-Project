@@ -210,7 +210,6 @@ def compute_overlap_set(
 
 
 def compute_overlap_set_cached(
-    points:         np.ndarray,         # (N,3)
     scan_ids:       np.ndarray,         # (N,)
     nbr_cache:      list[np.ndarray]    # (N,K)
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -219,7 +218,7 @@ def compute_overlap_set_cached(
         overlap_idx: 1-D array of indices belonging to the overlap set
         overlap_mask:   boolean mask of length N (True -> point in overlap set)
     """
-    N = points.shape[0]
+    N = scan_ids.shape[0]
     overlap_mask = np.zeros(N, dtype=bool)
 
     for i in range(N):
@@ -228,15 +227,53 @@ def compute_overlap_set_cached(
 
         neighbour_idx = nbr_cache[i]
 
-        if neighbour_idx.size == 0: # isolated point – cannot overlap
+        if neighbour_idx.size == 0: # isolated point - cannot overlap
             continue
 
         if np.any(scan_ids[neighbour_idx] != scan_ids[i]):
             overlap_mask[neighbour_idx] = True # whole cylinder
-            overlap_mask[i]       = True # include the seed itself
+            overlap_mask[i]             = True # include the seed itself
 
     overlap_idx = np.nonzero(overlap_mask)[0]
     return overlap_idx, overlap_mask
+
+def smooth_overlap_set_cached(
+        overlap_mask:   np.ndarray,
+        nbr_cache:      list[np.ndarray],
+        p_thresh:       float=0.5,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+    """Relabels small islands of non-overlapping vertices.
+
+    Args:
+        overlap_mask (np.ndarray): boolean mask; is vertex in overlap set?
+        nbr_cache (list[np.ndarray]): list of precomputed neighbours per vertex
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: overlap_idx, overlap_mask
+    """
+    mask_out = overlap_mask.copy()
+    for i in np.arange(overlap_mask.shape[0]):
+
+        if overlap_mask[i]:
+            continue
+
+        neighbour_idx = nbr_cache[i]
+
+        if neighbour_idx.size == 0:
+            print(f'point {i} has no neighbours')
+            continue
+
+        ovlp_nbrs = overlap_mask[neighbour_idx]
+        
+        # Proportion of neighbours in overlap set
+        p = np.sum(ovlp_nbrs) / len(ovlp_nbrs)
+
+        if p > p_thresh:
+            mask_out[i] = True
+
+    idx_out = np.nonzero(mask_out)[0]
+
+    return (idx_out, mask_out)
 
 
 def trilateral_shift(

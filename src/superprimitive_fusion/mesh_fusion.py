@@ -5,6 +5,7 @@ from superprimitive_fusion.mesh_fusion_utils import (
     smooth_normals,
     calc_local_spacing,
     compute_overlap_set_cached,
+    smooth_overlap_set_cached,
     precompute_cyl_neighbours,
     trilateral_shift_cached,
     find_boundary_edges,
@@ -97,7 +98,8 @@ def fuse_meshes(
     # ---------------------------------------------------------------------
     nbr_cache = precompute_cyl_neighbours(points, normals, local_spacing, r_alpha, h_alpha, kd_tree)
 
-    overlap_idx, overlap_mask = compute_overlap_set_cached(points, scan_ids, nbr_cache)
+    overlap_idx, overlap_mask = compute_overlap_set_cached(scan_ids, nbr_cache)
+    overlap_idx, overlap_mask = smooth_overlap_set_cached(overlap_mask, nbr_cache)
 
     # ---------------------------------------------------------------------
     # Find overlap boundary edges
