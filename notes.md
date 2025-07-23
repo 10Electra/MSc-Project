@@ -58,14 +58,17 @@
 ...
 
 ## Final implementation goals
+- Implement a colour comparison in the trilateral filter
+  - Possibly only comparing Hue in HSV?
+
 - Averaging: weighting all the averages by 'age'
 
-- Fast nearest neighbour's search using pixel correspondences
+- Fast nearest neighbour search using pixel correspondences
 
 - Adaptive merging
-    - Reduce vertex density where not needed based on curvature
-    - Use before or after fusion?
-    - Use only for the fusion zone?
+  - Reduce vertex density where not needed based on curvature
+  - Use before or after fusion?
+  - Use only for the fusion zone?
 
 - Experiment with more complex objects
   - Scanner which trims more intelligently
@@ -92,3 +95,22 @@
 10. Trim the overlap mesh to the overlap boundary
 11. Concatenate the overlap mesh with the retained non-overlapping meshes
 12. Fill holes and clean mesh
+
+## Implementation efforts
+
+### Tried to use the original triangulations in the overlap region
+- Would have been nice to ...
+
+### Tried many ways to retriangulate the overlap region
+- Many ways to project the pointcloud
+  - Projecting onto the new mesh's camera view
+    - The overlap region is larger than the overlapping region of the new mesh because of the safety margin
+    - The new areas of the overlap region are not constrained to be visible from the new mesh's camera pose (they might fold during projection, causing spurious connections in 3d)
+  - Projecting the overlap region adaptively
+    - Many methods including local tangent planes triangulation, local PCA, laplacian magic didn't produce a representative mapping
+    - My own method involving imagining an ant crawling between points and projecting them locally relative to the starting point worked for some regions but not well overall
+  - Meshing directly
+    - Ball Pivoting Algorithm (best so far; has holes)
+    - Poisson (uses different vertices, thus hard to concat with old mesh)
+    - Alpha shapes (hard to choose a robust alpha)
+    - Investigated using 

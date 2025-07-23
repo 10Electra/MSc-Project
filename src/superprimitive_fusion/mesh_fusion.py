@@ -1,5 +1,6 @@
 import numpy as np
 import open3d as o3d  # type: ignore
+import pymeshfix
 
 from superprimitive_fusion.mesh_fusion_utils import (
     smooth_normals,
@@ -100,6 +101,7 @@ def fuse_meshes(
 
     overlap_idx, overlap_mask = compute_overlap_set_cached(scan_ids, nbr_cache)
     overlap_idx, overlap_mask = smooth_overlap_set_cached(overlap_mask, nbr_cache)
+    overlap_idx, overlap_mask = smooth_overlap_set_cached(overlap_mask, nbr_cache, p_thresh=1)
 
     # ---------------------------------------------------------------------
     # Find overlap boundary edges
@@ -118,6 +120,8 @@ def fuse_meshes(
     for _ in range(trilat_iters):
         trilat_shifted_pts = trilateral_shift_cached(trilat_shifted_pts, normals, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, shift_all)
     
+    kd_tree = o3d.geometry.KDTreeFlann(trilat_shifted_pts.T)
+
     # ---------------------------------------------------------------------
     # Merge nearby clusters
     # ---------------------------------------------------------------------
@@ -206,7 +210,7 @@ def fuse_meshes(
         )
         pcd.orient_normals_consistent_tangent_plane(k=30)
 
-    r_min = 1 * global_avg_spacing
+    r_min = global_avg_spacing
     radii = o3d.utility.DoubleVector(np.geomspace(r_min, r_min*4, num=5))
 
     overlap_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
@@ -218,8 +222,6 @@ def fuse_meshes(
     overlap_mesh.remove_degenerate_triangles()
     overlap_mesh.remove_non_manifold_edges()
     overlap_mesh.compute_vertex_normals()
-
-    overlap_mesh.vertex_colors = pcd.colors
 
     # ---------------------------------------------------------------------
     # Trim overlap mesh
@@ -233,6 +235,9 @@ def fuse_meshes(
         overlap_mesh, relevant_boundary_edges
     )
 
+    # ---------------------------------------------------------------------
+    # Concatenate trimmed overlap mesh and nonoverlap meshes
+    # ---------------------------------------------------------------------
     trimmed_overlap_tris = np.asarray(trimmed_overlap_mesh.triangles)
     fused_mesh_triangles = np.concatenate(
         [trimmed_overlap_tris, mapping[nonoverlap_tris]], axis=0
@@ -245,19 +250,35 @@ def fuse_meshes(
 
     fused_mesh.vertex_colors = o3d.utility.Vector3dVector(new_colours)
 
-    fused_mesh_t = o3d.t.geometry.TriangleMesh.from_legacy(fused_mesh)
-    fused_mesh_filled_t = fused_mesh_t.fill_holes(hole_size=r_min*10)
-    fused_mesh = fused_mesh_filled_t.to_legacy()
-    
-    fused_mesh.orient_triangles()
-    fused_mesh = flip_if_inwards(fused_mesh)
-
+    # ---------------------------------------------------------------------
+    # Clean up fused mesh
+    # ---------------------------------------------------------------------
     fused_mesh.remove_unreferenced_vertices()
     fused_mesh.remove_duplicated_triangles()
     fused_mesh.remove_duplicated_vertices()
     fused_mesh.remove_degenerate_triangles()
     fused_mesh.remove_non_manifold_edges()
-    fused_mesh.compute_vertex_normals()
+
+    mf = pymeshfix.PyTMesh(False)
+    mf.load_array(new_points, fused_mesh_triangles)
+    mf.fill_small_boundaries(nbe=10)
+
+    points, faces = mf.return_arrays()
+    # fused_mesh_t = o3d.t.geometry.TriangleMesh.from_legacy(fused_mesh)
+    # fused_mesh_filled_t = fused_mesh_t.fill_holes(hole_size=r_min*10)
+    # fused_mesh = fused_mesh_filled_t.to_legacy()
+    
+    # fused_mesh.orient_triangles()
+    # fused_mesh = flip_if_inwards(fused_mesh)
+    fused_mesh.triangles = o3d.utility.Vector3iVector(faces)
+    # repaired = o3d.geometry.TriangleMesh()
+    # repaired.vertices = o3d.utility.Vector3dVector(points)
+    # repaired.triangles = o3d.utility.Vector3iVector(faces)
+    # repaired.vertex_colors = o3d.utility.Vector3dVector(new_colours)
+
+    # fused_mesh.compute_vertex_normals()
+
+    o3d.visualization.draw_geometries([fused_mesh])
 
     return fused_mesh
 

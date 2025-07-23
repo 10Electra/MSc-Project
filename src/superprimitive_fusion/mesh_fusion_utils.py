@@ -241,6 +241,7 @@ def smooth_overlap_set_cached(
         overlap_mask:   np.ndarray,
         nbr_cache:      list[np.ndarray],
         p_thresh:       float=0.5,
+        non_ovlp_thresh:int=5,
     ) -> Tuple[np.ndarray, np.ndarray]:
     """Relabels small islands of non-overlapping vertices.
 
@@ -268,7 +269,7 @@ def smooth_overlap_set_cached(
         # Proportion of neighbours in overlap set
         p = np.sum(ovlp_nbrs) / len(ovlp_nbrs)
 
-        if p > p_thresh:
+        if p > p_thresh or (len(ovlp_nbrs) - np.sum(ovlp_nbrs) < non_ovlp_thresh):
             mask_out[i] = True
 
     idx_out = np.nonzero(mask_out)[0]
@@ -336,7 +337,7 @@ def trilateral_shift(
         if w_sum < 1e-12:
             continue
 
-        delta_h = (w @ h_signed) / w_sum   # minus sign pulls toward denser side
+        delta_h = (w @ h_signed) / w_sum
         new_pts[i] = p + delta_h * n        # move along normal only
 
     return new_pts
@@ -396,7 +397,7 @@ def trilateral_shift_cached(
         if w_sum < 1e-12:
             continue
 
-        delta_h = (w @ h_signed) / w_sum    # minus sign pulls toward denser side
+        delta_h = (w @ h_signed) / w_sum
         new_pts[i] = p + delta_h * n        # move along normal only
 
     return new_pts
