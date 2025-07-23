@@ -1,6 +1,7 @@
 import numpy as np
 import open3d as o3d  # type: ignore
-import pymeshfix
+import pymeshfix # type: ignore
+from scipy.spatial import cKDTree # type: ignore
 
 from superprimitive_fusion.mesh_fusion_utils import (
     smooth_normals,
@@ -15,19 +16,84 @@ from superprimitive_fusion.mesh_fusion_utils import (
 )
 
 from line_profiler import profile
-def flip_if_inwards(mesh: o3d.geometry.TriangleMesh):
-    mesh.compute_triangle_normals()
-    c_mesh   = mesh.get_center()
-    tris     = np.asarray(mesh.triangles)
-    verts    = np.asarray(mesh.vertices)
-    tri_ctr  = verts[tris].mean(axis=1)              # (F,3)
-    tri_norm = np.asarray(mesh.triangle_normals)     # (F,3)
-    score    = np.sum((tri_ctr - c_mesh) * tri_norm) # signed “flux”
 
-    if score < 0:                                    # pointing inside
-        mesh.triangles = o3d.utility.Vector3iVector(tris[:, [0, 2, 1]])
-        mesh.compute_vertex_normals()
-    return mesh
+def validate_mesh(V, F, eps_area=1e-18):
+    import numpy as np
+    report = {}
+
+    report["shape_V"] = V.shape
+    report["shape_F"] = F.shape
+    report["dtype_V"] = str(V.dtype)
+    report["dtype_F"] = str(F.dtype)
+    report["contig_V"] = V.flags["C_CONTIGUOUS"]
+    report["contig_F"] = F.flags["C_CONTIGUOUS"]
+
+    report["finite_V"] = np.isfinite(V).all()
+    report["nan_count"] = np.isnan(V).any(axis=1).sum()
+    report["inf_count"] = np.isinf(V).any(axis=1).sum()
+
+    report["min_idx"] = int(F.min()) if F.size else None
+    report["max_idx"] = int(F.max()) if F.size else None
+    report["idx_in_range"] = F.size == 0 or (F.min() >= 0 and F.max() < len(V))
+
+    same = (F[:,0]==F[:,1]) | (F[:,1]==F[:,2]) | (F[:,2]==F[:,0])
+    report["degenerate_faces"] = int(same.sum())
+
+    if F.size:
+        a = np.linalg.norm(
+            np.cross(V[F[:,1]]-V[F[:,0]],
+                     V[F[:,2]]-V[F[:,0]]),
+            axis=1)
+        report["zero_area_faces"] = int((a <= eps_area).sum())
+    else:
+        report["zero_area_faces"] = 0
+
+    # boundary edges count (fast)
+    E = F[:, [0,1, 1,2, 2,0]].reshape(-1, 2)
+    E.sort(axis=1)
+    _, counts = np.unique(E, axis=0, return_counts=True)
+    report["boundary_edges"] = int((counts == 1).sum())
+
+    return report
+
+def sanitize_mesh(V, F):
+    # shapes
+    assert V.ndim == 2 and V.shape[1] == 3, f"V shape {V.shape}"
+    assert F.ndim == 2 and F.shape[1] == 3, f"F shape {F.shape}"
+
+    # dtypes / contiguity
+    V = np.ascontiguousarray(V, dtype=np.float64)
+    F = np.ascontiguousarray(F, dtype=np.int32)
+
+    # finite vertices
+    finite = np.isfinite(V).all(axis=1)
+    if not finite.all():
+        V_idx = np.where(~finite)[0]
+        print(f"Removing {len(V_idx)} non-finite verts")
+    Vmap = -np.ones(len(V), dtype=np.int32)
+    Vmap[finite] = np.arange(finite.sum(), dtype=np.int32)
+    V = V[finite]
+
+    # drop faces touching removed verts
+    F = F[(finite[F]).all(axis=1)]
+
+    # indices in range?
+    if F.size:
+        if F.min() < 0 or F.max() >= len(V):
+            raise ValueError("Face indices out of range after filtering")
+
+    # remove degenerate/zero-area faces
+    same = (F[:,0]==F[:,1]) | (F[:,1]==F[:,2]) | (F[:,2]==F[:,0])
+    if same.any():
+        F = F[~same]
+
+    if F.size:
+        a = np.linalg.norm(np.cross(V[F[:,1]]-V[F[:,0]], V[F[:,2]]-V[F[:,0]]), axis=1)
+        F = F[a > 1e-18]
+
+    V = np.ascontiguousarray(V, dtype=np.float64)
+    F = np.ascontiguousarray(F, dtype=np.int32)
+    return V, F
 
 @profile
 def fuse_meshes(
@@ -38,6 +104,7 @@ def fuse_meshes(
     trilat_iters: int = 2,
     nrm_smth_iters: int = 1,
     shift_all: bool = False,
+    fill_holes: bool = True,
 ) -> o3d.geometry.TriangleMesh:
     """Fuses two registered open3d triangle meshes.
 
@@ -258,29 +325,54 @@ def fuse_meshes(
     fused_mesh.remove_duplicated_vertices()
     fused_mesh.remove_degenerate_triangles()
     fused_mesh.remove_non_manifold_edges()
-
-    mf = pymeshfix.PyTMesh(False)
-    mf.load_array(new_points, fused_mesh_triangles)
-    mf.fill_small_boundaries(nbe=10)
-
-    points, faces = mf.return_arrays()
-    # fused_mesh_t = o3d.t.geometry.TriangleMesh.from_legacy(fused_mesh)
-    # fused_mesh_filled_t = fused_mesh_t.fill_holes(hole_size=r_min*10)
-    # fused_mesh = fused_mesh_filled_t.to_legacy()
-    
-    # fused_mesh.orient_triangles()
-    # fused_mesh = flip_if_inwards(fused_mesh)
-    fused_mesh.triangles = o3d.utility.Vector3iVector(faces)
-    # repaired = o3d.geometry.TriangleMesh()
-    # repaired.vertices = o3d.utility.Vector3dVector(points)
-    # repaired.triangles = o3d.utility.Vector3iVector(faces)
-    # repaired.vertex_colors = o3d.utility.Vector3dVector(new_colours)
-
     # fused_mesh.compute_vertex_normals()
 
-    o3d.visualization.draw_geometries([fused_mesh])
+    if not fill_holes:
+        return fused_mesh
+    
+    fused_mesh_triangles = np.asarray(fused_mesh.triangles, dtype=np.int32)
 
-    return fused_mesh
+    V0 = np.ascontiguousarray(new_points, dtype=np.float64)
+    F0 = np.ascontiguousarray(fused_mesh_triangles, dtype=np.int32)
+    C0 = new_colours
+
+    # sanity checks
+    if not np.isfinite(V0).all():
+        raise ValueError("Non-finite vertex coordinates")
+    if F0.min() < 0 or F0.max() >= len(V0):
+        raise ValueError("Face indices out of range")
+
+    V0, F0 = sanitize_mesh(new_points, fused_mesh_triangles)
+    print(validate_mesh(new_points, fused_mesh_triangles))
+    # V0 = new_points
+    # F0 = fused_mesh_triangles
+    # C0 = new_colours
+
+    mf = pymeshfix.PyTMesh(False)
+    mf.load_array(V0, F0)
+
+    mf.fill_small_boundaries(nbe=10)
+
+    V1, F1 = mf.return_arrays()
+
+    # ---- colour transfer
+    tree = cKDTree(V0)
+    dist, idx = tree.query(V1, k=1)
+    C1 = C0[idx]
+
+    mask = dist > 1e-6
+    if mask.any():
+        dist3, idx3 = tree.query(V1[mask], k=3)
+        w = 1.0 / (dist3 + 1e-12)
+        w /= w.sum(axis=1, keepdims=True)
+        C1[mask] = (C0[idx3] * w[..., None]).sum(axis=1)
+
+    repaired = o3d.geometry.TriangleMesh()
+    repaired.vertices = o3d.utility.Vector3dVector(V1)
+    repaired.triangles = o3d.utility.Vector3iVector(F1)
+    repaired.vertex_colors = o3d.utility.Vector3dVector(C1)
+    repaired.compute_vertex_normals()
+    return repaired
 
 
 if __name__ == "__main__":
