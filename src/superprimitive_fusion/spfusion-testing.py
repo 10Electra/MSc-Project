@@ -38,7 +38,7 @@ for i in range(1,j):
         h_alpha=5,
         trilat_iters=2,
         shift_all=False,
-        fill_holes=True,
+        fill_holes=False,
     )
 
 o3d.visualization.draw_geometries(

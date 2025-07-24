@@ -4,6 +4,7 @@ import open3d as o3d # type: ignore
 from typing import Tuple, Union
 import copy
 from collections import deque, defaultdict
+from scipy.spatial import cKDTree # type: ignore
 
 
 def smooth_normals(points: np.ndarray,
@@ -100,6 +101,9 @@ def calc_local_spacing(
                              f"increase point cloud size or reduce k.")
 
         r_k2 = d2[-1]               # Squared distance to k-th real neighbour
+        if r_k2 == 0:
+            print('Warning: a neighbour distance was found to be 0')
+            r_k2 += 1e-8
         rho[i] = k / (np.pi * r_k2)
         D[i]  = 1.0 / np.sqrt(rho[i])
 
@@ -600,3 +604,61 @@ def merge_nearby_clusters(
         np.vstack(clustered_overlap_cols),
         np.vstack(clustered_overlap_nrms),
     )
+
+def sanitize_mesh(V, F):
+    # shapes
+    assert V.ndim == 2 and V.shape[1] == 3, f"V shape {V.shape}"
+    assert F.ndim == 2 and F.shape[1] == 3, f"F shape {F.shape}"
+
+    # dtypes / contiguity
+    V = np.ascontiguousarray(V, dtype=np.float64)
+    F = np.ascontiguousarray(F, dtype=np.int32)
+
+    # finite vertices
+    finite = np.isfinite(V).all(axis=1)
+    if not finite.all():
+        bad = np.where(~finite)[0]
+        print(f"Removing {len(bad)} non-finite verts")
+
+    # old -> new index map  (-1 for removed)
+    Vmap = -np.ones(len(V), dtype=np.int32)
+    Vmap[finite] = np.arange(finite.sum(), dtype=np.int32)
+
+    # drop faces touching removed verts
+    keep_faces = (Vmap[F] >= 0).all(axis=1)
+    F = F[keep_faces]
+
+    # remap faces so they reference the *same* vertices (in geometry) after compaction
+    F = Vmap[F]
+
+    # compact vertices
+    V = V[finite]
+
+    # remove degenerate/zero-area faces
+    if F.size:
+        same = (F[:,0] == F[:,1]) | (F[:,1] == F[:,2]) | (F[:,2] == F[:,0])
+        if same.any():
+            F = F[~same]
+
+    if F.size:
+        n = np.cross(V[F[:,1]] - V[F[:,0]], V[F[:,2]] - V[F[:,0]])
+        a = np.linalg.norm(n, axis=1)
+        F = F[a > 1e-18]
+
+    # final dtypes / contiguity
+    V = np.ascontiguousarray(V, dtype=np.float64)
+    F = np.ascontiguousarray(F, dtype=np.int32)
+    return V, F
+
+def colour_transfer(V0, C0, V1):
+    tree = cKDTree(V0)
+    dist, idx = tree.query(V1, k=1)
+    C1 = C0[idx]
+
+    mask = dist > 1e-6
+    if mask.any():
+        dist3, idx3 = tree.query(V1[mask], k=3)
+        w = 1.0 / (dist3 + 1e-12)
+        w /= w.sum(axis=1, keepdims=True)
+        C1[mask] = (C0[idx3] * w[..., None]).sum(axis=1)
+    return C1
