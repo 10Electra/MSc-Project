@@ -1,5 +1,9 @@
-import open3d as o3d  # type: ignore
+import math
 import numpy as np
+import open3d as o3d  # type: ignore
+from typing import Tuple, Dict, List
+
+Vec3 = Tuple[float, float, float]
 
 ###########################################################
 # Geometry helpers                                        #
@@ -67,16 +71,16 @@ def _interpolate_vertex_colors(mesh: o3d.geometry.TriangleMesh,
 
 def virtual_rgbd_scan(
     mesh: o3d.geometry.TriangleMesh,
-    cam_centre=(80.0, 80.0, 0.0),
+    cam_centre=(0.3, 0.3, 0.0),
     look_dir=(0.0, 0.0, 0.0),
     *,
-    dropout_rate: float = 0.10,
+    dropout_rate: float = 0.0,
     depth_error_std: float = 0.0,
     translation_error_std: float = 0.0,
     rotation_error_std_degs: float = 0.0,
-    width_px: int = 640,
-    height_px: int = 480,
-    fov: float = 90.0,
+    width_px: int = 360,
+    height_px: int = 240,
+    fov: float = 70.0,
     dist_thresh: float = 10.0,
 ):
     """Generate a *virtual* depth scan of *mesh* and return a coloured mesh."""
@@ -123,6 +127,35 @@ def virtual_rgbd_scan(
     verts = origins + dirs * t_noisy[..., None]
     verts = verts.reshape(-1, 3)
 
+    #######################################
+    # Mark 'bad' (discontinuous) vertices #
+    #######################################
+    H, W = height_px, width_px
+
+    z = t_noisy.reshape(H, W)
+    valid_img = valid.reshape(H, W)
+
+    disp = np.zeros_like(z, dtype=np.float32)
+    disp[valid_img] = 1.0 / z[valid_img]
+
+    # Neighbor disparity diffs
+    dx = np.abs(disp[:, 1:] - disp[:, :-1])
+    dy = np.abs(disp[1:, :] - disp[:-1, :])
+
+    mask_x = valid_img[:, 1:] & valid_img[:, :-1]
+    mask_y = valid_img[1:, :] & valid_img[:-1, :]
+
+    vals = np.concatenate([dx[mask_x].ravel(), dy[mask_y].ravel()])
+    if vals.size:
+        med = np.median(vals)
+        mad = 1.4826 * np.median(np.abs(vals - med))
+        thr = med + 3.0 * mad if mad > 0 else med * 1.5  # fallback if everything is flat
+    else:
+        thr = np.inf  # nothing valid → nothing is bad by disparity
+
+    bad_x = (~mask_x) | (dx > thr)   # shape (H, W-1)
+    bad_y = (~mask_y) | (dy > thr)   # shape (H-1, W)
+
     ######################################
     # Optional colour interpolation step #
     ######################################
@@ -141,7 +174,6 @@ def virtual_rgbd_scan(
     ########################
     # Re‑construct surface #
     ########################
-    H, W = height_px, width_px
     tris: list[list] = []
     for v in range(H - 1):
         for u in range(W - 1):
@@ -153,11 +185,13 @@ def virtual_rgbd_scan(
             if not (valid[quad[0]] and valid[quad[1]] and valid[quad[2]] and valid[quad[3]]):
                 continue
 
-            quad_verts = verts[list(quad)]
-            
-            # large edge ‑> depth discontinuity
-            if any(np.linalg.norm(quad_verts[i] - quad_verts[(i + 1) % 4]) > dist_thresh for i in range(4)):
+            if (bad_x[v, u] or          # tl - tr
+                bad_x[v + 1, u] or      # bl - br
+                bad_y[v, u] or          # tl - bl
+                bad_y[v, u + 1]):       # tr - br
                 continue
+            
+            quad_verts = verts[list(quad)]
 
             tris.extend(_quad_to_tris(quad, quad_verts))
 
@@ -222,3 +256,83 @@ if __name__ == '__main__':
     )
     
     o3d.visualization.draw_geometries([mesh_scan], window_name="Virtual scan (mesh)")
+
+###########################################################
+# Auto scan distribution                                  #
+###########################################################
+
+def fibonacci_sphere_points(n: int, radius: float) -> List[Vec3]:
+    """Roughly even points on a sphere using the Fibonacci lattice."""
+    pts = []
+    golden_angle = math.pi * (3 - math.sqrt(5))
+    for i in range(n):
+        y = 1 - (2*i + 1)/n   # y in (-1,1)
+        r_xy = math.sqrt(max(0.0, 1 - y*y))
+        theta = i * golden_angle
+        x = math.cos(theta) * r_xy
+        z = math.sin(theta) * r_xy
+        pts.append((radius*x, radius*y, radius*z))
+    return pts
+
+def capture_spherical_scans(
+    mesh,
+    num_views: int = 6,
+    radius: float = 0.3,
+    look_at: Vec3 = (0.0, 0.0, 0.0),
+    width_px: int = 180,
+    height_px: int = 120,
+    fov: float = 70.0,
+    dropout_rate: float = 0.0,
+    depth_error_std: float = 0.003,
+    translation_error_std: float = 0.0,
+    rotation_error_std_degs: float = 0.0,
+    dist_thresh: float = 0.25,
+    scale: float = 1.0,
+    sampler: str = "fibonacci",  # or "latlong"
+    return_pcd: bool = False,
+) -> List[Dict[str, object]]:
+    """
+    Capture RGB-D scans from evenly spaced viewpoints on a sphere.
+
+    Returns a list of dicts with keys:
+      - 'mesh': mesh_scan
+      - 'pcd': pcd_scan (if return_pcd=True)
+      - 'cam_centre': Vec3
+      - 'look_dir': Vec3
+    """
+    # Sample viewpoints
+    if sampler == "fibonacci":
+        cam_centres = fibonacci_sphere_points(num_views, radius)
+    elif sampler == "latlong":
+        cam_centres = []
+        for i in range(num_views):
+            lat = 60  # fix or change to your needs
+            lon = (360/num_views) * i
+            cam_centres.append(polar2cartesian(r=radius, lat=lat, long=lon))
+    else:
+        raise ValueError(f"Unknown sampler '{sampler}'")
+
+    scans = []
+    for c in cam_centres:
+        mesh_scan, pcd_scan = virtual_rgbd_scan(
+            mesh,
+            cam_centre=c,
+            look_dir=look_at,
+            width_px=width_px,
+            height_px=height_px,
+            fov=fov,
+            dropout_rate=dropout_rate,
+            depth_error_std=depth_error_std * scale,
+            translation_error_std=translation_error_std * scale,
+            rotation_error_std_degs=rotation_error_std_degs,
+            dist_thresh=dist_thresh * scale,
+        )
+        record = {
+            "mesh": mesh_scan,
+            "cam_centre": c,
+            "look_dir": look_at,
+        }
+        if return_pcd:
+            record["pcd"] = pcd_scan
+        scans.append(record)
+    return scans

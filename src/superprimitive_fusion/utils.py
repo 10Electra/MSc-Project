@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import open3d as o3d  # type: ignore
 from trimesh import Trimesh
 from mpl_toolkits.axes_grid1 import make_axes_locatable # type: ignore
+from matplotlib import colors
 
 
 def get_integer_segments(sp_regions):
@@ -406,3 +407,34 @@ def polar2cartesian(r, lat, long, unit='deg'):
     y = r * sin(lat) * sin(long)
     z = r * cos(lat)
     return (x, y, z)
+
+def distinct_colours(n: int, *, s: float = 0.9, v: float = 0.9) -> np.ndarray:
+    """
+    Generate `n` visually distinct RGB colours.
+
+    Parameters
+    ----------
+    n : int
+        Number of colours requested (≥ 0).
+    s : float, optional
+        Saturation in HSV space (0-1).  High values avoid washed-out tones.
+    v : float, optional
+        Brightness/Value in HSV space (0-1).  <1.0 prevents pure white.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape (n, 3) with floats in [0, 1] representing RGB colours.
+    """
+    if n <= 0:
+        return np.empty((0, 3), dtype=float)
+
+    # Evenly spaced hues (endpoint=False avoids repeating the first hue)
+    hues = np.linspace(0.0, 1.0, n, endpoint=False)
+
+    # Compose HSV array and convert to RGB
+    hsv = np.stack([hues, np.full_like(hues, s), np.full_like(hues, v)], axis=1)
+    rgb = colors.hsv_to_rgb(hsv)          # shape (n,3), float64 in [0,1]
+
+    return rgb
+
