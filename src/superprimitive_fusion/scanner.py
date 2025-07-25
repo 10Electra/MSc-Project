@@ -81,7 +81,7 @@ def virtual_rgbd_scan(
     width_px: int = 360,
     height_px: int = 240,
     fov: float = 70.0,
-    dist_thresh: float = 10.0,
+    k: float = 3.0,
 ):
     """Generate a *virtual* depth scan of *mesh* and return a coloured mesh."""
     ###############
@@ -149,7 +149,7 @@ def virtual_rgbd_scan(
     if vals.size:
         med = np.median(vals)
         mad = 1.4826 * np.median(np.abs(vals - med))
-        thr = med + 3.0 * mad if mad > 0 else med * 1.5  # fallback if everything is flat
+        thr = med + k * mad if mad > 0 else med * 1.5  # fallback if everything is flat
     else:
         thr = np.inf  # nothing valid → nothing is bad by disparity
 
@@ -252,7 +252,7 @@ if __name__ == '__main__':
         fov=70,
         dropout_rate=0,
         depth_error_std=0.0001,
-        dist_thresh=10,
+        k=3.0,
     )
     
     o3d.visualization.draw_geometries([mesh_scan], window_name="Virtual scan (mesh)")
@@ -286,7 +286,7 @@ def capture_spherical_scans(
     depth_error_std: float = 0.003,
     translation_error_std: float = 0.0,
     rotation_error_std_degs: float = 0.0,
-    dist_thresh: float = 0.25,
+    k: float = 3,
     scale: float = 1.0,
     sampler: str = "fibonacci",  # or "latlong"
     return_pcd: bool = False,
@@ -325,7 +325,7 @@ def capture_spherical_scans(
             depth_error_std=depth_error_std * scale,
             translation_error_std=translation_error_std * scale,
             rotation_error_std_degs=rotation_error_std_degs,
-            dist_thresh=dist_thresh * scale,
+            k=k,
         )
         record = {
             "mesh": mesh_scan,
