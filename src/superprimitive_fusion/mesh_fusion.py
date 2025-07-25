@@ -222,8 +222,10 @@ def fuse_meshes(
         np.all(mapped_boundary_edges < len(overlap_mesh.vertices), axis=1)
     ]
 
+    k = len(overlap_mesh.cluster_connected_triangles()[1])
+
     trimmed_overlap_mesh = topological_trim(
-        overlap_mesh, relevant_boundary_edges
+        overlap_mesh, relevant_boundary_edges, k=k,
     )
 
     # ---------------------------------------------------------------------

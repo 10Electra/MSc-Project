@@ -9,6 +9,9 @@ from matplotlib import colors
 
 
 def get_integer_segments(sp_regions):
+    if sp_regions.ndim == 2:
+        print('Only one mask found - returning it.')
+        return sp_regions
     integer_segments = np.zeros([sp_regions.shape[1], sp_regions.shape[2]])
     for i in range(sp_regions.shape[0]):
         integer_segments[sp_regions[i,:,:]] = i + 1
@@ -73,19 +76,28 @@ def triangulate_segments(verts, integer_segments):
             quad_idx = (id_bl, id_tl, id_tr, id_br)
             quad_verts = np.array([verts[id] for id in quad_idx])
 
+            not_finite = (~np.isfinite(quad_verts))
+            if not_finite.sum() > 2:
+                continue  # Can't make a single triangle
+
             sps = [int(integer_segments.flatten()[id]) for id in quad_idx]
             sp_counts = {}
-            for sp in sps:
+            for sp in sps: # Count sps in quad
                 sp_counts[sp] = 1 + sp_counts.get(sp, 0)
 
             if len(sp_counts) == 1 and sps[0] != 0: # All verts from one sp
-                tri1, tri2 = quadto2tris(quad_idx, quad_verts)
-                tris[sps[0]-1].extend([tri1, tri2])
+                if np.sum(not_finite) > 0:
+                    tris[sps[0]-1].append(np.flip(np.where(~not_finite)))
+                else:
+                    tri1, tri2 = quadto2tris(quad_idx, quad_verts)
+                    tris[sps[0]-1].extend([tri1, tri2])
             elif len(sp_counts) == 2 and len(set(sp_counts.values())) == 2: # Three verts from one sp, one from another
                 aclock_quad_idx = list(quad_idx)
                 for i in range(4):
                     if sp_counts[sps[i]] == 1:
                         del aclock_quad_idx[i]
+                if not np.isfinite([verts[id] for id in aclock_quad_idx]).all():
+                    continue # Skip this triangle if any verts are not finite
                 sample_sp = int(integer_segments.flatten()[aclock_quad_idx[0]])
                 if sample_sp == 0:
                     continue # Skip this triangle if it is not in a superprimitive

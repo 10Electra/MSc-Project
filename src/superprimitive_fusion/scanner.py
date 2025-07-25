@@ -1,7 +1,10 @@
 import math
 import numpy as np
+import torch # type: ignore
 import open3d as o3d  # type: ignore
 from typing import Tuple, Dict, List
+
+from superprimitive_fusion.utils import get_integer_segments, triangulate_segments
 
 Vec3 = Tuple[float, float, float]
 
@@ -232,30 +235,117 @@ def virtual_rgbd_scan(
 
     return mesh_out, pcd
 
+def virtual_rgbd_scan_segmentation(
+    mesh: o3d.geometry.TriangleMesh,
+    mask_generator,
+    cam_centre=(0.3, 0.3, 0.0),
+    look_dir=(0.0, 0.0, 0.0),
+    *,
+    depth_error_std: float = 0.0,
+    translation_error_std: float = 0.0,
+    rotation_error_std_degs: float = 0.0,
+    width_px: int = 360,
+    height_px: int = 240,
+    fov: float = 70.0,
+):
+    """Generate a virtual depth scan of mesh and return a coloured mesh."""
+    ###############
+    # Ray casting #
+    ###############
+    scene = o3d.t.geometry.RaycastingScene()
+    scene.add_triangles(o3d.t.geometry.TriangleMesh.from_legacy(mesh))
 
-if __name__ == '__main__':
-    import open3d as o3d
-    from superprimitive_fusion.utils import bake_uv_to_vertex_colours, polar2cartesian
-
-    mesh = o3d.io.read_triangle_mesh("data/mustard-bottle/textured.obj", enable_post_processing=True)
-
-    bake_uv_to_vertex_colours(mesh)
-
-    mesh.compute_vertex_normals()
-
-    mesh_scan, pcd_scan = virtual_rgbd_scan(
-        mesh,
-        cam_centre=polar2cartesian(r=0.3, lat=90, long=90),
-        look_dir=(0, 0, 0),
-        width_px=360,
-        height_px=240,
-        fov=70,
-        dropout_rate=0,
-        depth_error_std=0.0001,
-        k=3.0,
+    rays = o3d.t.geometry.RaycastingScene.create_rays_pinhole(
+        fov_deg=fov,
+        center=list(look_dir),
+        eye=list(cam_centre),
+        up=[0, 0, 1],
+        width_px=width_px,
+        height_px=height_px,
     )
-    
-    o3d.visualization.draw_geometries([mesh_scan], window_name="Virtual scan (mesh)")
+
+    ans = scene.cast_rays(rays)
+    t_hit = ans["t_hit"].numpy()
+
+    valid = np.isfinite(t_hit).reshape(-1)
+
+    # Intersection metadata (triangle id + barycentric uv)
+    prim_ids = ans["primitive_ids"].numpy().astype(np.int32)
+    bary_uv = ans.get("primitive_uvs", None).numpy()
+
+    ########################
+    # Generate 3‑D vertices#
+    ########################
+    rays_np = rays.numpy()  # (H*W,6)
+    origins = rays_np[..., :3]
+    dirs = rays_np[..., 3:]
+    noise = (depth_error_std * np.random.randn(*t_hit.shape)).astype(np.float32)
+    t_noisy = t_hit + noise
+    verts = origins + dirs * t_noisy[..., None]
+    verts = verts.reshape(-1, 3)
+
+    ######################################
+    # Optional colour interpolation step #
+    ######################################
+    vcols = np.full((height_px, width_px, 3), 0.5, dtype=np.float32)
+    if mesh.has_vertex_colors():
+        if bary_uv is not None:
+            vcols = _interpolate_vertex_colors(mesh, prim_ids, bary_uv)
+        else:  # fall back to the first vertex of the hit triangle
+            source_cols = np.asarray(mesh.vertex_colors)
+            tri_first = np.asarray(mesh.triangles, dtype=np.int32)[prim_ids, 0]
+            vcols = source_cols[tri_first]
+        # invalid hits – set to black
+        vcols.reshape(-1,3)[~valid] = np.full(3, 0.0)
+
+    #######################
+    # Peform segmentation #
+    #######################
+    masks = mask_generator.generate(vcols.astype(np.float32))
+
+    sp_regions = np.array([mask['segmentation'] for mask in masks])
+
+    int_seg = get_integer_segments(sp_regions)
+
+    tris = triangulate_segments(verts, int_seg)
+    all_tris = [tri for trise in tris for tri in trise]
+
+    mesh_out = o3d.geometry.TriangleMesh()
+    mesh_out.vertices = o3d.utility.Vector3dVector(verts)
+    mesh_out.triangles = o3d.utility.Vector3iVector(all_tris)
+
+    if vcols is not None:
+        mesh_out.vertex_colors = o3d.utility.Vector3dVector(vcols.reshape(-1,3))
+
+    #############################
+    # Clean‑up / post‑processing#
+    #############################
+    mesh_out.remove_unreferenced_vertices()
+    mesh_out.remove_degenerate_triangles()
+    mesh_out.remove_duplicated_triangles()
+    mesh_out.remove_non_manifold_edges()
+    mesh_out.compute_vertex_normals()
+
+    ######################
+    # Registration error #
+    ######################
+    mesh_out.translate(tuple(np.random.randn(3) * translation_error_std))
+    R = mesh.get_rotation_matrix_from_xyz(
+        tuple(np.random.randn(3) * np.deg2rad(rotation_error_std_degs))
+    )
+    mesh_out.rotate(R, center=mesh_out.get_center())
+
+    #######################
+    # Noised point cloud  #
+    #######################
+    pcd = o3d.t.geometry.PointCloud(o3d.core.Tensor(verts, dtype=o3d.core.Dtype.Float32))
+    pcd = pcd.translate(tuple(np.random.randn(3) * translation_error_std))
+    R = mesh.get_rotation_matrix_from_xyz(
+        tuple(np.random.randn(3) * np.deg2rad(rotation_error_std_degs))
+    )
+    pcd = pcd.rotate(R, center=pcd.get_center())
+
+    return mesh_out, pcd
 
 ###########################################################
 # Auto scan distribution                                  #
@@ -290,6 +380,7 @@ def capture_spherical_scans(
     scale: float = 1.0,
     sampler: str = "fibonacci",  # or "latlong"
     return_pcd: bool = False,
+    mask_generator=None,
 ) -> List[Dict[str, object]]:
     """
     Capture RGB-D scans from evenly spaced viewpoints on a sphere.
@@ -314,19 +405,33 @@ def capture_spherical_scans(
 
     scans = []
     for c in cam_centres:
-        mesh_scan, pcd_scan = virtual_rgbd_scan(
-            mesh,
-            cam_centre=c,
-            look_dir=look_at,
-            width_px=width_px,
-            height_px=height_px,
-            fov=fov,
-            dropout_rate=dropout_rate,
-            depth_error_std=depth_error_std * scale,
-            translation_error_std=translation_error_std * scale,
-            rotation_error_std_degs=rotation_error_std_degs,
-            k=k,
-        )
+        if mask_generator is None:
+            mesh_scan, pcd_scan = virtual_rgbd_scan(
+                mesh,
+                cam_centre=c,
+                look_dir=look_at,
+                width_px=width_px,
+                height_px=height_px,
+                fov=fov,
+                dropout_rate=dropout_rate,
+                depth_error_std=depth_error_std * scale,
+                translation_error_std=translation_error_std * scale,
+                rotation_error_std_degs=rotation_error_std_degs,
+                k=k,
+            )
+        else:
+            mesh_scan, pcd_scan = virtual_rgbd_scan_segmentation(
+                mesh,
+                mask_generator=mask_generator,
+                cam_centre=c,
+                look_dir=look_at,
+                width_px=width_px,
+                height_px=height_px,
+                fov=fov,
+                depth_error_std=depth_error_std * scale,
+                translation_error_std=translation_error_std * scale,
+                rotation_error_std_degs=rotation_error_std_degs,
+            )
         record = {
             "mesh": mesh_scan,
             "cam_centre": c,
@@ -336,3 +441,28 @@ def capture_spherical_scans(
             record["pcd"] = pcd_scan
         scans.append(record)
     return scans
+
+
+if __name__ == '__main__':
+    import open3d as o3d
+    from superprimitive_fusion.utils import bake_uv_to_vertex_colours, polar2cartesian
+
+    mesh = o3d.io.read_triangle_mesh("data/mustard-bottle/textured.obj", enable_post_processing=True)
+
+    bake_uv_to_vertex_colours(mesh)
+
+    mesh.compute_vertex_normals()
+
+    mesh_scan, pcd_scan = virtual_rgbd_scan(
+        mesh,
+        cam_centre=polar2cartesian(r=0.3, lat=90, long=90),
+        look_dir=(0, 0, 0),
+        width_px=360,
+        height_px=240,
+        fov=70,
+        dropout_rate=0,
+        depth_error_std=0.0001,
+        k=3.0,
+    )
+    
+    o3d.visualization.draw_geometries([mesh_scan], window_name="Virtual scan (mesh)")

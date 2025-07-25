@@ -437,22 +437,26 @@ def find_boundary_edges(triangles:np.ndarray):
 
 def topological_trim(mesh: o3d.geometry.TriangleMesh,
                      cut_edges: np.ndarray,
-                     keep_largest: bool = True) -> o3d.geometry.TriangleMesh:
+                     k: int = 1) -> o3d.geometry.TriangleMesh:
     """
-    Remove all faces that lie on the other side of one or more closed edge-loops.
+    Remove faces that lie on the other side of one or more closed edge-loops
+    and keep the k largest remaining components (by area).
 
     Parameters
     ----------
-    mesh         : open3d.geometry.TriangleMesh (watertight or open)
-    cut_edges    : (N,2) array of vertex indices that form one or more closed loops
-    keep_largest : keep only the component with the largest total area (True),
-                   otherwise return the whole list of outside components.
+    mesh      : open3d.geometry.TriangleMesh (watertight or open)
+    cut_edges : (N,2) int array of vertex indices forming one or more closed loops
+    k         : number of largest components to keep (k <= total components)
 
     Returns
     -------
-    o3d.geometry.TriangleMesh with unwanted triangles removed and vertices compacted.
+    A copy of 'mesh' with the unwanted triangles removed and vertices compacted.
     """
+    if k < 1:
+        raise ValueError("k must be at least 1")
+
     tris = np.asarray(mesh.triangles)
+
     # Build edge to tri dictionary
     edge2tri = defaultdict(list)
     for tidx, tri in enumerate(tris):
@@ -487,23 +491,22 @@ def topological_trim(mesh: o3d.geometry.TriangleMesh,
                     q.append(n)
         curr += 1
 
-    # Choose which components to keep
-    if keep_largest and curr > 1:
-        verts = np.asarray(mesh.vertices)[tris]
-        areas = 0.5 * np.linalg.norm(np.cross(verts[:, 1] - verts[:, 0],
-                                              verts[:, 2] - verts[:, 0]), axis=1)
-        comp_area = np.bincount(comp, weights=areas, minlength=curr)
-        keep_comp = np.argmax(comp_area)
-        tri_keep  = np.flatnonzero(comp == keep_comp)
+    verts = np.asarray(mesh.vertices)[tris] # (T,3,3)
+    tri_area = 0.5 * np.linalg.norm(
+        np.cross(verts[:, 1] - verts[:, 0],
+                 verts[:, 2] - verts[:, 0]), axis=1)
+    comp_area = np.bincount(comp, weights=tri_area, minlength=curr)
+    
+    if k >= curr:                          # nothing to discard
+        tri_keep = np.arange(len(tris))
     else:
-        tri_keep = np.arange(len(tris))  # Keep all triangles
+        keep_comps = np.argpartition(comp_area, -k)[-k:]  # unsorted k‑largest
+        tri_keep   = np.flatnonzero(np.isin(comp, keep_comps))
 
-    # Triangle ids to drop from the mesh
     tri_drop = np.setdiff1d(np.arange(len(tris)), tri_keep, assume_unique=True)
 
     out = copy.copy(mesh)
     out.remove_triangles_by_index(tri_drop.tolist())
-    # out.remove_unreferenced_vertices()
     return out
 
 
