@@ -8,6 +8,18 @@
 
 - [ ] Implement mesh.merge_close_vertices(eps)?
 
+
+- [ ] Fix hole-filling normals bug
+- [ ] Test superprimitive fusion at different resolution scales
+- [ ] Improve discontinuity machine
+- [ ] Construct scene of many objects
+- [ ] Make camera paths
+- [ ] Fuse scene
+- [ ] Add icp for extra robustness
+- [ ] Demonstrate fusion of noisy and badly registered superprimitives
+- [ ] Evaluate the meshes somehow
+- [ ] Find a method to compare it to??
+
 ## Approach
 
 - Currently building segmented meshes from superprimitives; an alternative approach would be to cookie-cut (convex hull type method) superprimitives from complete environment mesh?
