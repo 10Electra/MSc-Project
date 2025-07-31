@@ -13,7 +13,7 @@ from superprimitive_fusion.mesh_fusion_utils import (
     find_boundary_edges,
     topological_trim,
     merge_nearby_clusters,
-    sanitize_mesh,
+    sanitise_mesh,
     colour_transfer,
 )
 
@@ -200,9 +200,15 @@ def fuse_meshes(
             )
         )
         pcd.orient_normals_consistent_tangent_plane(k=30)
+    
+    points_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
+    dists = points_pcd.compute_nearest_neighbor_distance()
+    s = np.median(dists)
 
-    r_min = global_avg_spacing
-    radii = o3d.utility.DoubleVector(np.geomspace(r_min, r_min*4, num=5))
+    radii = o3d.utility.DoubleVector([1.2*s, 2*s, 3*s, 4*s])
+
+    # r_min = global_avg_spacing
+    # radii = o3d.utility.DoubleVector(np.geomspace(r_min, r_min*4, num=5))
 
     overlap_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
         pcd, radii
@@ -251,13 +257,12 @@ def fuse_meshes(
     fused_mesh.remove_duplicated_vertices()
     fused_mesh.remove_degenerate_triangles()
     fused_mesh.remove_non_manifold_edges()
-    # fused_mesh.compute_vertex_normals()
 
     if not fill_holes:
         fused_mesh.compute_vertex_normals()
         return fused_mesh
 
-    V0, F0 = sanitize_mesh(new_points, fused_mesh_triangles)
+    V0, F0 = sanitise_mesh(new_points, fused_mesh_triangles)
     C0 = new_colours
 
     mf = pymeshfix.PyTMesh(False)

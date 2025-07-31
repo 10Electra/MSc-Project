@@ -126,3 +126,9 @@
     - Poisson (uses different vertices, thus hard to concat with old mesh)
     - Alpha shapes (hard to choose a robust alpha)
     - Investigated using 
+
+###
+
+- Number of input views
+- Resolution of input scans
+- ^ Make a 2D plot for accuracy and time complexity

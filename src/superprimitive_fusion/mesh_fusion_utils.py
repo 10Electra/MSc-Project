@@ -5,6 +5,7 @@ from typing import Tuple, Union
 import copy
 from collections import deque, defaultdict
 from scipy.spatial import cKDTree # type: ignore
+from superprimitive_fusion.utils import distinct_colours
 
 
 def smooth_normals(points: np.ndarray,
@@ -608,7 +609,7 @@ def merge_nearby_clusters(
         np.vstack(clustered_overlap_nrms),
     )
 
-def sanitize_mesh(V, F):
+def sanitise_mesh(V, F):
     # shapes
     assert V.ndim == 2 and V.shape[1] == 3, f"V shape {V.shape}"
     assert F.ndim == 2 and F.shape[1] == 3, f"F shape {F.shape}"
@@ -665,3 +666,138 @@ def colour_transfer(V0, C0, V1):
         w /= w.sum(axis=1, keepdims=True)
         C1[mask] = (C0[idx3] * w[..., None]).sum(axis=1)
     return C1
+
+def get_mesh_components(mesh:o3d.geometry.TriangleMesh, show=True):
+    out = mesh.cluster_connected_triangles()
+
+    clust_ids = np.asarray(out[0])
+    unique_clusters = np.unique(clust_ids)
+    print(f'There are {len(unique_clusters)} clusters of connected components')
+
+    colours = distinct_colours(len(unique_clusters))
+    colours = (colours * 255).astype(np.uint8)
+
+    components = []
+    for i in unique_clusters:
+        component = copy.deepcopy(mesh)
+        tris = np.asarray(component.triangles)
+        tris_clust = tris[clust_ids==i]
+        component.triangles = o3d.utility.Vector3iVector(tris_clust)
+        component.paint_uniform_color(colours[i].astype(float) / 255)
+        components.append(component)
+
+    if show:
+        o3d.visualization.draw_geometries(
+            components
+        )
+    return components
+
+def count_inconsistent_normal_pairs(mesh: o3d.geometry.TriangleMesh,
+                                    dot_threshold: float = 0.0,
+                                    include_nonmanifold_pairs: bool = False,
+                                    show: bool = False) -> int:
+    if len(mesh.triangles) == 0:
+        if show:
+            print("Found 0 inconsistent pairs across 0 triangles")
+        return 0
+
+    if len(mesh.triangle_normals) != len(mesh.triangles):
+        mesh.compute_triangle_normals(normalized=True)
+
+    normals = np.asarray(mesh.triangle_normals, dtype=np.float64)
+    triangles = np.asarray(mesh.triangles, dtype=np.int64)
+
+    # Build list of adjacent triangle index pairs
+    edge_to_tris = defaultdict(list)
+    for t_idx, (a, b, c) in enumerate(triangles):
+        for u, v in ((a, b), (b, c), (c, a)):
+            e = (u, v) if u < v else (v, u)
+            edge_to_tris[e].append(t_idx)
+
+    pairs = []
+    for tris in edge_to_tris.values():
+        k = len(tris)
+        if k == 2:
+            pairs.append(tris)
+        elif include_nonmanifold_pairs and k > 2:
+            for i in range(k):
+                for j in range(i + 1, k):
+                    pairs.append((tris[i], tris[j]))
+
+    if not pairs:
+        if show:
+            print("Found 0 inconsistent pairs across 0 triangles")
+        return 0
+
+    pairs = np.asarray(pairs, dtype=np.int64)
+    n1 = normals[pairs[:, 0]]
+    n2 = normals[pairs[:, 1]]
+    dots = np.einsum("ij,ij->i", n1, n2)
+    bad_pair_mask = dots < dot_threshold
+    count = int(np.count_nonzero(bad_pair_mask))
+
+    if show:
+        bad_tris_idx = np.unique(pairs[bad_pair_mask].ravel())
+        bad_mask = np.zeros(len(triangles), dtype=bool)
+        bad_mask[bad_tris_idx] = True
+
+        bg = copy.deepcopy(mesh)
+        fg = copy.deepcopy(mesh)
+
+        bg.triangles = o3d.utility.Vector3iVector(triangles[~bad_mask])
+        fg.triangles = o3d.utility.Vector3iVector(triangles[bad_mask])
+
+        bg.paint_uniform_color([0.8, 0.8, 0.8])
+        fg.paint_uniform_color([1.0, 0.0, 0.0])
+
+        print(f"Found {count} inconsistent pairs across {bad_mask.sum()} triangles")
+        o3d.visualization.draw_geometries([bg, fg])
+
+    return count
+
+
+def show_mesh_boundaries(mesh: o3d.geometry.TriangleMesh, show: bool = True, edges: bool = True, base_mesh:o3d.geometry.TriangleMesh|None=None):
+    """
+    Display boundary edges (preferred) or boundary vertices of a triangle mesh.
+    Returns the list of Open3D geometries shown.
+    """
+    tris = np.asarray(mesh.triangles, dtype=np.int64)
+    if tris.size == 0:
+        if show:
+            print("No triangles.")
+        return []
+
+    edge_counts = {}
+    for a, b, c in tris:
+        for u, v in ((a, b), (b, c), (c, a)):
+            e = (u, v) if u < v else (v, u)
+            edge_counts[e] = edge_counts.get(e, 0) + 1
+
+    bnd_edges = np.array([e for e, cnt in edge_counts.items() if cnt == 1], dtype=np.int64)
+    verts = np.asarray(mesh.vertices, dtype=np.float64)
+
+    if base_mesh is None:
+        bg = copy.deepcopy(mesh)
+    else:
+        bg = copy.deepcopy(base_mesh)
+    bg.paint_uniform_color([0.8, 0.8, 0.8])
+
+    geoms = [bg]
+    if edges and len(bnd_edges) > 0:
+        uniq = np.unique(bnd_edges.ravel())
+        idx = {v: i for i, v in enumerate(uniq)}
+        lines = np.array([(idx[i], idx[j]) for i, j in bnd_edges], dtype=np.int32)
+        ls = o3d.geometry.LineSet(points=o3d.utility.Vector3dVector(verts[uniq]),
+                                  lines=o3d.utility.Vector2iVector(lines))
+        ls.colors = o3d.utility.Vector3dVector(np.tile([1.0, 0.0, 0.0], (len(lines), 1)))
+        geoms.append(ls)
+    else:
+        uniq = np.unique(bnd_edges.ravel()) if len(bnd_edges) > 0 else np.array([], dtype=np.int64)
+        pcd = o3d.geometry.PointCloud(points=o3d.utility.Vector3dVector(verts[uniq]))
+        pcd.paint_uniform_color([1.0, 0.0, 0.0])
+        geoms.append(pcd)
+
+    print(f"Found {len(bnd_edges)} boundary edges and {len(uniq)} boundary vertices.")
+    if show:
+        o3d.visualization.draw_geometries(geoms)
+    return geoms
