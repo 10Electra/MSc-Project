@@ -131,4 +131,4 @@
 
 - Number of input views
 - Resolution of input scans
-- ^ Make a 2D plot for accuracy and time complexity
+  - ^ Make a 2D plot for accuracy and time complexity
