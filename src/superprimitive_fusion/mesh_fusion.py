@@ -200,12 +200,29 @@ def fuse_meshes(
             )
         )
         pcd.orient_normals_consistent_tangent_plane(k=30)
-    
-    points_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
-    dists = points_pcd.compute_nearest_neighbor_distance()
-    s = np.median(dists)
 
-    radii = o3d.utility.DoubleVector([1.2*s, 2*s, 3*s, 4*s])
+    def density_aware_radii(pcd: o3d.geometry.PointCloud, k=10):
+        pts = np.asarray(pcd.points)
+        kdt = o3d.geometry.KDTreeFlann(pcd)
+        dk = np.empty(len(pts))
+        for i, p in enumerate(pts):
+            _, _, d2 = kdt.search_knn_vector_3d(p, k+1)  # includes the point itself
+            dk[i] = np.sqrt(d2[-1])                      # k-th neighbor distance
+        h10, h50, h90 = np.percentile(dk, [10, 50, 90])
+        r_min = 0.8 * h10
+        r_mid = h50
+        r_max = 1.2 * h90
+        return [r_min, r_mid, r_max]
+
+    radii = o3d.utility.DoubleVector(density_aware_radii(pcd, k=10))
+    pcd.estimate_normals(o3d.geometry.KDTreeSearchParamKNN(40))
+    pcd.orient_normals_consistent_tangent_plane(50)
+    
+    # points_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
+    # dists = points_pcd.compute_nearest_neighbor_distance()
+    # s = np.median(dists)
+
+    # radii = o3d.utility.DoubleVector([1.2*s, 2*s, 3*s, 4*s])
 
     # r_min = global_avg_spacing
     # radii = o3d.utility.DoubleVector(np.geomspace(r_min, r_min*4, num=5))
