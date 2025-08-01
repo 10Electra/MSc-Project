@@ -81,7 +81,17 @@ models/
 *.ckpt
 *.onnx
 
-data/*
+data/mustard-bottle
+data/kfs_moge_realsense
+data/kfs_moge_tum
+data/mustard360
+data/power-drill
+data/replica_room_0
+data/table
+data/ycb-meshes
+data/masks.pkl
+data/scene.blend
+data/scene.blend1
 *.csv
 *.tsv
 *.json

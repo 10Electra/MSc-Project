@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<materialx version="1.38" xmlns:xi="http://www.w3.org/2001/XInclude">
+  <surfacematerial name="Table_Wood_01" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="Table_Wood_01_surface" />
+  </surfacematerial>
+  <standard_surface name="Table_Wood_01_surface" type="surfaceshader">
+    <input name="base" type="float" value="1" />
+    <input name="base_color" type="color3" value="0.5, 0.5, 0.5" nodename="map_Basecolor" />
+    <input name="diffuse_roughness" type="float" value="0" />
+    <input name="specular" type="float" value="1" />
+    <input name="specular_color" type="color3" value="1, 1, 1" />
+    <input name="specular_roughness" type="float" value="0" nodename="map_Roughness" />
+    <input name="specular_IOR" type="float" value="1.52" />
+    <input name="specular_rotation" type="float" value="0.25" />
+    <input name="metalness" type="float" value="0" nodename="map_Metallic" />
+    <input name="transmission" type="float" value="0" />
+    <input name="transmission_color" type="color3" value="1, 1, 1" />
+    <input name="transmission_depth" type="float" value="0" />
+    <input name="thin_walled" type="boolean" value="false" />
+    <input name="subsurface" type="float" value="0" />
+    <input name="subsurface_color" type="color3" value="1, 1, 1" />
+    <input name="subsurface_radius" type="color3" value="1, 0.5, 0.25" />
+    <input name="subsurface_scale" type="float" value="1" />
+    <input name="emission" type="float" value="1" />
+    <input name="emission_color" type="color3" value="0, 0, 0" />
+    <input name="coat" type="float" value="0" />
+    <input name="coat_color" type="color3" value="1, 1, 1" />
+    <input name="coat_roughness" type="float" value="0" />
+    <input name="coat_IOR" type="float" value="1.52" />
+    <input name="coat_affect_color" type="float" value="0.5" />
+    <input name="coat_affect_roughness" type="float" value="0.5" />
+    <input name="normal" type="vector3" nodename="Normal" />
+  </standard_surface>
+  <tiledimage name="map_Basecolor" type="color3">
+    <input name="uvtiling" type="vector2" value="1,1" />
+    <input name="file" type="filename" colorspace="gamma22" value="textures/table_wood_01_basecolor.png" />
+  </tiledimage>
+  <tiledimage name="map_Roughness" type="float">
+    <input name="uvtiling" type="vector2" value="1,1" />
+    <input name="file" type="filename" value="Textures/Table_Wood_01_Roughness.png" />
+  </tiledimage>
+  <tiledimage name="map_Metallic" type="float">
+    <input name="uvtiling" type="vector2" value="1,1" />
+    <input name="file" type="filename" value="Textures/Table_Wood_01_Metallic.png" />
+  </tiledimage>
+  <normalmap name="Normal" type="vector3">
+    <input name="in" type="vector3" nodename="map_Normal" />
+    <input name="scale" type="float" value="-1" />
+  </normalmap>
+  <tiledimage name="map_Normal" type="vector3">
+    <input name="uvtiling" type="vector2" value="1,1" />
+    <input name="file" type="filename" value="Textures/Table_Wood_01_Normal.png" />
+  </tiledimage>
+</materialx>
