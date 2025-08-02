@@ -443,7 +443,7 @@ def capture_spherical_scans(
     return scans
 
 def render_rgb_view(
-    mesh: o3d.geometry.TriangleMesh,
+    meshes: list[o3d.geometry.TriangleMesh],
     cam_centre=(0.3, 0.3, 0.0),
     look_dir=(0.0, 0.0, 0.0),
     *,
@@ -452,14 +452,15 @@ def render_rgb_view(
     fov: float = 70.0,
     bg_rgba=(1.0, 1.0, 1.0, 1.0),  # white background
 ) -> np.ndarray:
-    """Render an RGB image of `mesh` from a given camera pose."""
+    """Render an RGB image of a scene defined by `meshes` from a given camera pose."""
     renderer = o3d.visualization.rendering.OffscreenRenderer(width_px, height_px)
-
-    # Simple material: unlit if vertex colors exist, otherwise lit shading
-    mtl = o3d.visualization.rendering.MaterialRecord()
-    mtl.shader = "defaultUnlit" if mesh.has_vertex_colors() else "defaultLit"
-    renderer.scene.add_geometry("mesh", mesh, mtl)
     renderer.scene.set_background(bg_rgba)
+
+    # Add all meshes with simple per-mesh materials
+    for i, mesh in enumerate(meshes):
+        mtl = o3d.visualization.rendering.MaterialRecord()
+        mtl.shader = "defaultUnlit" if mesh.has_vertex_colors() else "defaultLit"
+        renderer.scene.add_geometry(f"mesh_{i}", mesh, mtl)
 
     # Camera: vertical FOV in degrees, look-at with Z-up
     aspect = width_px / height_px
@@ -476,6 +477,7 @@ def render_rgb_view(
     if rgb.ndim == 3 and rgb.shape[2] == 4:  # drop alpha if present
         rgb = rgb[:, :, :3]
     return rgb
+
 
 
 if __name__ == '__main__':
