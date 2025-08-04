@@ -282,81 +282,17 @@ def smooth_overlap_set_cached(
     return (idx_out, mask_out)
 
 
-def trilateral_shift(
-    points:           np.ndarray,               # (N,3)
-    normals:          np.ndarray,               # (N,3)
-    local_spacing:    np.ndarray,               # (N,) local sampling spacing
-    local_density:    np.ndarray,               # (N,) local sampling density
-    overlap_idx:      np.ndarray,               # (L,) indices to be updated
-    tree:             o3d.geometry.KDTreeFlann, # open3d KD-tree
-    r_alpha: float = 2.0,
-    h_alpha: float = 2.0,
-) -> np.ndarray:
-    """
-    Returns: updated (N,3) point array after one trilateral-shift pass.
-    """
-
-    new_pts = points.copy()
-
-    for i in overlap_idx:
-        p = points[i]
-        n = normals[i]
-        Dpj = local_spacing[i]
-
-        nbr, _ = find_cyl_neighbours(
-                    point   = p,
-                    normal  = n,
-                    local_spacing = Dpj,
-                    h_alpha = h_alpha,
-                    r_alpha = r_alpha,
-                    points  = points,
-                    tree    = tree,
-                    self_idx= i
-                )
-
-        if nbr.size == 0:
-            continue
-
-        pts_nbr = points[nbr]               # (k,3)
-        diff    = pts_nbr - p                # vectors from p to neighbours
-        h_signed= diff @ n                   # signed axial offsets  (k,)
-        h_abs   = np.abs(h_signed)
-        r2      = np.square(diff).sum(axis=1) - h_abs*h_abs
-        r2      = np.maximum(r2, 0.0)
-        r_abs   = np.sqrt(r2)                # radial distance
-
-        sigma_r = r_alpha * Dpj
-        sigma_h = 2.0 * h_alpha * Dpj
-        w_domain = np.exp(-(r_abs**2) / (2*sigma_r**2))
-        w_range  = np.exp(-(h_abs**2) / (2*sigma_h**2))
-
-        rho_i   = local_density[i]
-        rho_nbr = local_density[nbr]
-        d_rho   = rho_i - rho_nbr           # sign irrelevant after square
-        sigma_rho = np.max(np.abs(d_rho)) + 1e-12
-        w_rho   = np.exp(-(d_rho**2) / (2*sigma_rho**2))
-        w       = w_domain * w_range * w_rho
-
-
-        w_sum = w.sum()
-        if w_sum < 1e-12:
-            continue
-
-        delta_h = (w @ h_signed) / w_sum
-        new_pts[i] = p + delta_h * n        # move along normal only
-
-    return new_pts
-
-
 def trilateral_shift_cached(
     points:         np.ndarray,                 # (N,3)
     normals:        np.ndarray,                 # (N,3)
+    weights:        np.ndarray,                 # (N,) weights for each point
     local_spacing:  np.ndarray,                 # (N,) local sampling spacing
     local_density:  np.ndarray,                 # (N,) local sampling density
     overlap_idx:    np.ndarray,                 # (L,) indices to be updated
     nbr_cache:      list[np.ndarray],           # (N,K)
     r_alpha: float = 2.0,
     h_alpha: float = 2.0,
+    sigma_theta: float = 0.2,                   # normal angle difference std (related to sharpness)
     shift_all: bool = False,                    # All pts or just overlap
 ) -> np.ndarray:
     """
@@ -378,24 +314,35 @@ def trilateral_shift_cached(
             continue
 
         pts_nbr = points[nbr]               # (k,3)
+        weights_nbr = weights[nbr]          # (k,)
+        normals_nbr = normals[nbr]          # (k,3)
+
         diff    = pts_nbr - p               # vectors from p to neighbours
         h_signed= diff @ n                  # signed axial offsets  (k,)
         h_abs   = np.abs(h_signed)
+
         r2      = np.square(diff).sum(axis=1) - h_abs*h_abs
         r2      = np.maximum(r2, 0.0)
         r_abs   = np.sqrt(r2)               # radial distance
 
-        sigma_r = r_alpha * Dpj
-        sigma_h = 2.0 * h_alpha * Dpj
-        w_domain = np.exp(-(r_abs**2) / (2*sigma_r**2))
-        w_range  = np.exp(-(h_abs**2) / (2*sigma_h**2))
+        cos_theta   = normals_nbr @ n       # (k,) cosine of angle between normals
 
-        rho_i   = local_density[i]
-        rho_nbr = local_density[nbr]
-        d_rho   = rho_i - rho_nbr           # sign irrelevant after square
-        sigma_rho = np.max(np.abs(d_rho)) + 1e-12
-        w_rho   = np.exp(-(d_rho**2) / (2*sigma_rho**2))
-        w       = w_domain * w_range * w_rho
+        rho_i       = local_density[i]
+        rho_nbr     = local_density[nbr]
+        d_rho       = rho_i - rho_nbr       # sign irrelevant after square
+
+        sigma_r     = r_alpha * Dpj
+        sigma_h     = 2.0 * h_alpha * Dpj
+        sigma_rho   = np.max(np.abs(d_rho)) + 1e-12
+
+        w_radial    = np.exp(-(r_abs**2) / (2*sigma_r**2))
+        w_vertical  = np.exp(-(h_abs**2) / (2*sigma_h**2))
+        w_normal    = np.exp(-((1.0 - cos_theta)**2) / (2 * sigma_theta**2))
+        w_density   = np.exp(-(d_rho**2) / (2*sigma_rho**2))
+
+        w           = w_radial * w_vertical * w_density * w_normal
+
+        w *= weights_nbr                    # incorporate vertex confidence
 
 
         w_sum = w.sum()
@@ -514,13 +461,14 @@ def topological_trim(mesh: o3d.geometry.TriangleMesh,
 def merge_nearby_clusters(
     trilat_shifted_pts: np.ndarray,
     normals: np.ndarray,
+    weights: np.ndarray,
     colours: np.ndarray,
     overlap_mask: np.ndarray,
     overlap_idx: np.ndarray,
     global_avg_spacing: float,
     h_alpha: float,
     tree,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Merge nearby clusters of points in the overlap region.
 
@@ -528,6 +476,7 @@ def merge_nearby_clusters(
         points: (N, 3) array of original points.
         trilat_shifted_pts: (N, 3) array of shifted points.
         normals: (N, 3) array of normals.
+        weights: (N,) array of weights representing point confidence.
         colours: (N, C) array of colours.
         overlap_mask: (N,) boolean array indicating overlap points.
         global_avg_spacing: float, global average spacing.
@@ -553,6 +502,7 @@ def merge_nearby_clusters(
     clustered_overlap_pnts: list = []
     clustered_overlap_cols: list = []
     clustered_overlap_nrms: list = []
+    clustered_overlap_wts: list = []
 
     # keep iterating until every overlap point belongs to a cluster
     while (cluster_mapping[overlap_idx] < 0).any():
@@ -590,7 +540,16 @@ def merge_nearby_clusters(
 
         # Gaussian weights based on squared distances
         w = np.exp(-d2 / (2.0 * sigma**2))
-        w /= w.sum()
+
+        conf_nbr = weights[nbr_global]  # shape (K,)
+
+        w *= conf_nbr                   # modulate spatial weights by confidence
+        w_sum = w.sum()
+
+        if w_sum < 1e-12:
+            continue                    # avoid divide-by-zero
+
+        w /= w_sum
 
         merged_id = len(clustered_overlap_pnts)
         cluster_mapping[nbr_global] = merged_id
@@ -598,6 +557,7 @@ def merge_nearby_clusters(
         # Weighted averages
         clustered_overlap_pnts.append(w @ trilat_shifted_pts[nbr_global])
         clustered_overlap_cols.append(w @ colours[nbr_global])
+        clustered_overlap_wts.append(conf_nbr.sum())
 
         merged_nrm = w @ normals[nbr_global]
         clustered_overlap_nrms.append(merged_nrm / np.linalg.norm(merged_nrm))
@@ -607,6 +567,7 @@ def merge_nearby_clusters(
         np.vstack(clustered_overlap_pnts),
         np.vstack(clustered_overlap_cols),
         np.vstack(clustered_overlap_nrms),
+        np.vstack(clustered_overlap_wts),
     )
 
 def sanitise_mesh(V, F):
