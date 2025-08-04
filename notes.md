@@ -139,8 +139,17 @@
     - Alpha shapes (hard to choose a robust alpha)
     - Investigated using 
 
-###
+### Things to evaluate
 
 - Number of input views
 - Resolution of input scans
   - ^ Make a 2D plot for accuracy and time complexity
+
+### Bayesian strategy
+
+- Count the new scan as a measurement
+- Calculate the posterior 'confidence' for each of the original points (part of the overlapping area of the old surface)
+  - For each cylinder around a new point, calculate the probability of the new point given each of the existing points, e.g. p(z|x) and store each scalar in a list corresponding to each x
+  - After calculating the p(z|x) for every local z for every local x, multiply them using bayes'
+- Use the new confidences to weight a random selection in the point thinning step
+  - Select N/2 points based on a confidence-weighted selection and discard the others
