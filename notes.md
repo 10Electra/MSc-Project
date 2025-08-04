@@ -9,15 +9,27 @@
 - [ ] Implement mesh.merge_close_vertices(eps)?
 
 
-- [ ] Fix hole-filling normals bug
+- [ ] ~~Fix hole-filling normals bug~~
 - [ ] Test superprimitive fusion at different resolution scales
 - [ ] Improve discontinuity machine
-- [ ] Construct scene of many objects
-- [ ] Make camera paths
+- [x] Construct scene of many objects
+- [x] Make camera paths
+- [ ] Make SuperPrimitive segmentation work robustly for multi-object images
+  - [ ] Understand settings more
+  - [ ] Add some CV techniques for robustness
+- [ ] Make edge length filtering work with multi-object images to make them processable
+- [ ] Refactor the RGBD scanner and mesher
+  - [ ] It should accept a list of meshes
+  - [ ] It should output a list of meshes?
+- [ ] Add normal direction based filtering as part of the multilateral filter
+- [ ] Add vertex weight averaging
 - [ ] Fuse scene
 - [ ] Add icp for extra robustness
 - [ ] Demonstrate fusion of noisy and badly registered superprimitives
-- [ ] Evaluate the meshes somehow
+- [ ] Evaluate the method
+  - [ ] Compare meshes with ground truth
+  - [ ] Look at speed of meshing
+  - [ ] Plot each of these against two other factors: e.g. scan count and scan resolution.
 - [ ] Find a method to compare it to??
 
 ## Approach
