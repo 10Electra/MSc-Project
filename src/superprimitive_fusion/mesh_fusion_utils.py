@@ -163,7 +163,7 @@ def find_cyl_neighbours(
 def precompute_cyl_neighbours(
         points, normals, local_spacing,
         r_alpha, h_alpha, tree):
-    """Returns list[ndarray] of neighbour indices for every point."""
+    """Returns list[ndarray] of neighbour indices for every point (excl. self idx)."""
     nbr_lists = []
 
     for i, (pnt, nrm, l_sp) in enumerate(zip(points, normals, local_spacing)):
@@ -282,34 +282,41 @@ def smooth_overlap_set_cached(
     return (idx_out, mask_out)
 
 
-def trilateral_shift_cached(
+def normal_shift_smooth(
     points:         np.ndarray,                 # (N,3)
     normals:        np.ndarray,                 # (N,3)
-    weights:        np.ndarray,                 # (N,) weights for each point
+    weights:        np.ndarray,                 # (N,) precision for each point
     local_spacing:  np.ndarray,                 # (N,) local sampling spacing
     local_density:  np.ndarray,                 # (N,) local sampling density
     overlap_idx:    np.ndarray,                 # (L,) indices to be updated
     nbr_cache:      list[np.ndarray],           # (N,K)
-    r_alpha: float = 2.0,
-    h_alpha: float = 2.0,
-    sigma_theta: float = 0.2,                   # normal angle difference std (related to sharpness)
-    shift_all: bool = False,                    # All pts or just overlap
+    r_alpha:        float = 2.0,
+    h_alpha:        float = 2.0,
+    sigma_theta:    float = 0.2,                # Normal angle difference std (related to sharpness)
+    normal_diff_thresh: float = 45.0,           # degrees; hard front-facing gate
+    shift_all:      bool = False,               # All pts or just overlap
+    rho_floor:      float = 1e-6,               # floor for density std; disables w_density if tiny
 ) -> np.ndarray:
     """
-    Returns: updated (N,3) point array after one trilateral-shift pass.
+    One pass of along-normal shifting. Assumes:
+      - normals are unit-length,
+      - nbr_cache[i] already lies inside the cylinder (radius r_alpha*D_i, height 2*h_alpha*D_i),
+      - weights are precisions (e.g. 1/covariance).
+    Returns: updated (N,3) points array.
     """
 
     new_pts = points.copy()
-
     shift_idx = overlap_idx if not shift_all else range(len(points))
 
+    cos_thr = np.cos(np.deg2rad(normal_diff_thresh))
+    sigma_c = 0.5 * (sigma_theta ** 2)  # =~ mapping from angle sigma to cosine sigma
+    
     for i in shift_idx:
         p = points[i]
         n = normals[i]
         Dpj = local_spacing[i]
 
         nbr = nbr_cache[i]
-
         if nbr.size == 0:
             continue
 
@@ -317,40 +324,53 @@ def trilateral_shift_cached(
         weights_nbr = weights[nbr]          # (k,)
         normals_nbr = normals[nbr]          # (k,3)
 
-        diff    = pts_nbr - p               # vectors from p to neighbours
-        h_signed= diff @ n                  # signed axial offsets  (k,)
-        h_abs   = np.abs(h_signed)
+        # Normal similarity
+        cos_theta = np.einsum('ij,j->i', normals_nbr, n)
+        mask_face = cos_theta >= cos_thr
+        if not np.any(mask_face): 
+            continue
+        
+        cos_theta   = cos_theta[mask_face]
+        pts_nbr     = pts_nbr[mask_face]
+        weights_nbr = weights_nbr[mask_face]
+        normals_nbr = normals_nbr[mask_face]
 
-        r2      = np.square(diff).sum(axis=1) - h_abs*h_abs
-        r2      = np.maximum(r2, 0.0)
-        r_abs   = np.sqrt(r2)               # radial distance
+        diff    = pts_nbr - p               # Vectors from p to neighbours
+        h       = diff @ n                  # Signed axial offsets  (k,)
+        h2      = h * h
+        
+        r2      = np.einsum('ij,ij->i', diff, diff) - h2
+        r2      = np.maximum(r2, 0.0)       # Squared radial distance
+        
+        sigma_r     = r_alpha * Dpj         # Radius of cylinder neighbourhood
+        sigma_h     = 2.0 * h_alpha * Dpj   # Height of cylinder neighbourhood
+        
+        # Spatial Gaussian (radius and height components); summed exponents for stability
+        S = r2 / (2.0 * sigma_r * sigma_r) + h2 / (2.0 * sigma_h * sigma_h)
+        w_spatial = np.exp(-S)
+        
+        w_normal = np.exp(-(1.0 - cos_theta) / (2.0 * sigma_c))
+        
+        
+        # Using MAD as the std for local density
+        d_rho = local_density[i] - local_density[nbr][mask_face]
+        med         = np.median(d_rho)
+        mad         = np.median(np.abs(d_rho - med)) # Median absolute deviation
+        sigma_rho = 1.4826 * mad # =~ std if Gaussian
+        if sigma_rho < rho_floor:
+            w_density = 1.0
+            print('[WARN; vertex smoother] Using w_density=1.0 as sigma_rho < rho_floor.')
+        else:
+            w_density = np.exp(-(d_rho * d_rho) / (2.0 * sigma_rho * sigma_rho))
 
-        cos_theta   = normals_nbr @ n       # (k,) cosine of angle between normals
-
-        rho_i       = local_density[i]
-        rho_nbr     = local_density[nbr]
-        d_rho       = rho_i - rho_nbr       # sign irrelevant after square
-
-        sigma_r     = r_alpha * Dpj
-        sigma_h     = 2.0 * h_alpha * Dpj
-        sigma_rho   = np.max(np.abs(d_rho)) + 1e-12
-
-        w_radial    = np.exp(-(r_abs**2) / (2*sigma_r**2))
-        w_vertical  = np.exp(-(h_abs**2) / (2*sigma_h**2))
-        w_normal    = np.exp(-((1.0 - cos_theta)**2) / (2 * sigma_theta**2))
-        w_density   = np.exp(-(d_rho**2) / (2*sigma_rho**2))
-
-        w           = w_radial * w_vertical * w_density * w_normal
-
-        w *= weights_nbr                    # incorporate vertex confidence
-
+        w = weights_nbr * w_spatial * w_density * w_normal
 
         w_sum = w.sum()
         if w_sum < 1e-12:
             continue
 
-        delta_h = (w @ h_signed) / w_sum
-        new_pts[i] = p + delta_h * n        # move along normal only
+        delta_h = (w @ h) / w_sum
+        new_pts[i] = p + delta_h * n # move along normal only
 
     return new_pts
 
@@ -459,7 +479,7 @@ def topological_trim(mesh: o3d.geometry.TriangleMesh,
 
 
 def merge_nearby_clusters(
-    trilat_shifted_pts: np.ndarray,
+    normal_shifted_points: np.ndarray,
     normals: np.ndarray,
     weights: np.ndarray,
     colours: np.ndarray,
@@ -474,7 +494,7 @@ def merge_nearby_clusters(
 
     Args:
         points: (N, 3) array of original points.
-        trilat_shifted_pts: (N, 3) array of shifted points.
+        normal_shifted_points: (N, 3) array of shifted points.
         normals: (N, 3) array of normals.
         weights: (N,) array of weights representing point confidence.
         colours: (N, C) array of colours.
@@ -491,13 +511,13 @@ def merge_nearby_clusters(
     """
 
     # Convenience view limited to the overlap region (M points)
-    trilat_shifted_overlap_pts = trilat_shifted_pts[overlap_idx]
+    trilat_shifted_overlap_pts = normal_shifted_points[overlap_idx]
 
     delta  = np.sqrt(2.0) / 2.0
     sigma  = delta * global_avg_spacing
 
     # -1 means 'not yet assigned to any merged cluster'
-    cluster_mapping = -np.ones(len(trilat_shifted_pts), dtype=int)
+    cluster_mapping = -np.ones(len(normal_shifted_points), dtype=int)
 
     clustered_overlap_pnts: list = []
     clustered_overlap_cols: list = []
@@ -520,7 +540,7 @@ def merge_nearby_clusters(
             global_avg_spacing,
             h_alpha,
             delta,
-            trilat_shifted_pts,     # full data set for distance look‑up
+            normal_shifted_points,     # full data set for distance look‑up
             tree,
             self_idx=None,
         )
@@ -555,7 +575,7 @@ def merge_nearby_clusters(
         cluster_mapping[nbr_global] = merged_id
 
         # Weighted averages
-        clustered_overlap_pnts.append(w @ trilat_shifted_pts[nbr_global])
+        clustered_overlap_pnts.append(w @ normal_shifted_points[nbr_global])
         clustered_overlap_cols.append(w @ colours[nbr_global])
         clustered_overlap_wts.append(conf_nbr.sum())
 

@@ -9,7 +9,7 @@ from superprimitive_fusion.mesh_fusion_utils import (
     compute_overlap_set_cached,
     smooth_overlap_set_cached,
     precompute_cyl_neighbours,
-    trilateral_shift_cached,
+    normal_shift_smooth,
     find_boundary_edges,
     topological_trim,
     merge_nearby_clusters,
@@ -107,17 +107,17 @@ def fuse_meshes(
     # ---------------------------------------------------------------------
     # Trilateral point shifting
     # ---------------------------------------------------------------------
-    trilat_shifted_pts = points.copy()
+    normal_shifted_points = points.copy()
     for _ in range(trilat_iters):
-        trilat_shifted_pts = trilateral_shift_cached(trilat_shifted_pts, normals, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, shift_all)
+        normal_shifted_points = normal_shift_smooth(normal_shifted_points, normals, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, shift_all)
     
-    kd_tree = o3d.geometry.KDTreeFlann(trilat_shifted_pts.T)
+    kd_tree = o3d.geometry.KDTreeFlann(normal_shifted_points.T)
 
     # ---------------------------------------------------------------------
     # Merge nearby clusters
     # ---------------------------------------------------------------------
     cluster_mapping, clustered_overlap_pnts, clustered_overlap_cols, clustered_overlap_nrms = merge_nearby_clusters(
-        trilat_shifted_pts=trilat_shifted_pts,
+        normal_shifted_points=normal_shifted_points,
         normals=normals,
         colours=colours,
         overlap_mask=overlap_mask,
@@ -148,8 +148,8 @@ def fuse_meshes(
     new_points = np.concatenate(
         [
             clustered_overlap_pnts,
-            trilat_shifted_pts[border_mask],
-            trilat_shifted_pts[nonoverlap_nonborder_mask],
+            normal_shifted_points[border_mask],
+            normal_shifted_points[nonoverlap_nonborder_mask],
         ],
         axis=0,
     )
