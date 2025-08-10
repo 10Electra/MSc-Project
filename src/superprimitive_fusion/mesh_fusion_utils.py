@@ -541,7 +541,6 @@ def merge_nearby_clusters(
         
         p0  = normal_shifted_points[seed]
         n0  = normals[seed]
-        tau0= weights[seed]
 
         # Find cylindrical neighbours around the seed (global indices)
         nbr_global, d2 = find_cyl_neighbours(
@@ -583,7 +582,7 @@ def merge_nearby_clusters(
         c_merge = (tau[:, None] * colours[idxs]).sum(axis=0) / T
 
         # Normal: principal eigenvector of sum tau * n n^T
-        n_i   = normals[idxs]                            # (K,3)
+        n_i   = normals[idxs]   # (K,3)
         M     = (tau[:, None, None] * (n_i[:, :, None] * n_i[:, None, :])).sum(axis=0)  # 3x3
         eigvals, eigvecs = np.linalg.eigh(M)
         n_merge = eigvecs[:, np.argmax(eigvals)]

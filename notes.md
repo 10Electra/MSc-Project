@@ -2,18 +2,31 @@
 
 ## To do
 
-- [ ] Implement a trilateral filter with projected normal distance, perpendicular radius, colour
-- [ ] Apply mean-shift clustering
-- [ ] Implement some triangulation
+- [x] Implement a trilateral filter with projected normal distance, perpendicular radius, colour
+- [x] ~~Apply mean-shift clustering~~
+- [x] Implement some triangulation
 
-- [ ] Implement mesh.merge_close_vertices(eps)?
+- [ ] ~~Implement mesh.merge_close_vertices(eps)?~~
 
 
 - [ ] ~~Fix hole-filling normals bug~~
-- [ ] Test superprimitive fusion at different resolution scales
-- [ ] Improve discontinuity machine
+
+- [ ] Implement Bayesian weight update
+- [ ] Refactor multilateral normal-shift filter for Bayesian weights
+- [ ] Refactor point merging for Bayesian weights
+- [ ] Inject some noise into depth scan creation (either uniform Gaussian or Perlin or simulated MoGE-style noise)
+- [ ] Estimate Bayesian weights during depth scan creation based on that noise
+- [ ] Set up a simple noisy flat surface test to check convergence
+- [ ] Start writing report
+
+- [ ] Use MoGE and SuperPrimitive to test things
+
+- [x] Add normal direction based filtering as part of the multilateral filter
+- [x] Add vertex weight averaging
 - [x] Construct scene of many objects
 - [x] Make camera paths
+- [ ] Test superprimitive fusion at different resolution scales
+- [ ] Improve discontinuity machine
 - [ ] Make SuperPrimitive segmentation work robustly for multi-object images
   - [ ] Understand settings more
   - [ ] Add some CV techniques for robustness
@@ -21,16 +34,19 @@
 - [ ] Refactor the RGBD scanner and mesher
   - [ ] It should accept a list of meshes
   - [ ] It should output a list of meshes?
-- [ ] Add normal direction based filtering as part of the multilateral filter
-- [ ] Add vertex weight averaging
 - [ ] Fuse scene
-- [ ] Add icp for extra robustness
 - [ ] Demonstrate fusion of noisy and badly registered superprimitives
 - [ ] Evaluate the method
   - [ ] Compare meshes with ground truth
   - [ ] Look at speed of meshing
   - [ ] Plot each of these against two other factors: e.g. scan count and scan resolution.
 - [ ] Find a method to compare it to??
+- [ ] Add icp for extra robustness
+
+- [ ] Use the normals predicted by MoGE
+- [ ] Normalise the normals so we don't have to within the Bayesian update
+- [ ] Can my confidence in current data decrease?
+- [ ] Test both *sigma_h = 2.0 * h_alpha * Dpj* and *sigma_h = h_alpha * Dpj*
 
 ## Approach
 
