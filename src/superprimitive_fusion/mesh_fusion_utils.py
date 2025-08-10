@@ -517,84 +517,102 @@ def merge_nearby_clusters(
         clustered_wts:  (K,) precision (sum of member precisions)
     """
 
-    # Convenience view limited to the overlap region (M points)
-    normal_shifted_overlap_pts = normal_shifted_points[overlap_idx]
+    N = normal_shifted_points.shape[0]
+    C = colours.shape[1]
+    
+    # Output lists
+    out_pts:   list[np.ndarray] = []
+    out_cols:  list[np.ndarray] = []
+    out_nrms:  list[np.ndarray] = []
+    out_wts:   list[float]      = []
+    
+    # cluster mapping == -1 means 'not yet assigned to any merged cluster'
+    cluster_mapping = -np.ones(N, dtype=int)
+    visited         = np.zeros(N, dtype=bool)
 
-    delta  = np.sqrt(2.0) / 2.0
-    sigma  = delta * global_avg_spacing
+    # Highest precision first among overlap points
+    ordered_seeds = overlap_idx[np.argsort(weights[overlap_idx])[::-1]]
 
-    # -1 means 'not yet assigned to any merged cluster'
-    cluster_mapping = -np.ones(len(normal_shifted_points), dtype=int)
+    cos_th = np.cos(np.deg2rad(normal_diff_thresh))
 
-    clustered_overlap_pnts: list = []
-    clustered_overlap_cols: list = []
-    clustered_overlap_nrms: list = []
-    clustered_overlap_wts: list = []
+    for seed in ordered_seeds:
+        if visited[seed]:
+            continue
+        
+        p0  = normal_shifted_points[seed]
+        n0  = normals[seed]
+        tau0= weights[seed]
 
-    # keep iterating until every overlap point belongs to a cluster
-    while (cluster_mapping[overlap_idx] < 0).any():
-        # choose a still‑unassigned local seed index inside the overlap set
-        free_local_idx = np.flatnonzero(cluster_mapping[overlap_idx] < 0)
-        id_local       = np.random.choice(free_local_idx)
-
-        point  = normal_shifted_overlap_pts[id_local]
-        normal = normals[overlap_idx[id_local]]
-
-        # Note: 'find_cyl_neighbours' returns global indices w.r.t. the full tree
+        # Find cylindrical neighbours around the seed (global indices)
         nbr_global, d2 = find_cyl_neighbours(
-            point,
-            normal,
-            global_avg_spacing,
-            h_alpha,
-            delta,
-            normal_shifted_points,     # full data set for distance look‑up
-            tree,
-            self_idx=None,
+            point=p0,
+            normal=n0,
+            local_spacing=global_avg_spacing,
+            h_alpha=h_alpha,
+            r_alpha=np.sqrt(2.0) / 2.0,
+            points=normal_shifted_points,
+            tree=tree,
+            self_idx=seed
         )
 
-        # Keep neighbours that are themselves in the overlap region
-        overlap_neigh_mask = overlap_mask[nbr_global]
-        nbr_global = nbr_global[overlap_neigh_mask]
-        d2         = d2[overlap_neigh_mask]
-
-        # Keep only neighbours that have not yet been assigned to a cluster
-        unassigned_mask = cluster_mapping[nbr_global] < 0
-        nbr_global = nbr_global[unassigned_mask]
-        d2         = d2[unassigned_mask]
-
         if nbr_global.size == 0:
-            raise RuntimeError("Point neighbourhood is unexpectedly empty!")
+            # Lonely seed -> single-point cluster
+            idxs = np.array([seed], dtype=int)
+        else:
+            # Keep only overlap, not yet visited
+            m = overlap_mask[nbr_global] & (~visited[nbr_global])
+            if not np.any(m):
+                # Nothing to merge; make a singleton cluster for the seed
+                idxs = np.array([seed], dtype=int)
+            else:
+                nbr_global = nbr_global[m]
 
-        # Gaussian weights based on squared distances
-        w = np.exp(-d2 / (2.0 * sigma**2))
+                # Front-facing gate
+                cos = (normals[nbr_global] @ n0)
+                m2  = cos >= cos_th
+                idxs = nbr_global[m2]
+                if idxs.size == 0:
+                    idxs = np.array([seed], dtype=int)
 
-        conf_nbr = weights[nbr_global]  # shape (K,)
+        # Bayesian merge on idxs
+        tau = weights[idxs]     # (K,)
+        T   = float(tau.sum())  # scalar precision
 
-        w *= conf_nbr                   # modulate spatial weights by confidence
-        w_sum = w.sum()
+        # Positions & colours: precision-weighted means
+        x_merge = (tau[:, None] * normal_shifted_points[idxs]).sum(axis=0) / T
+        c_merge = (tau[:, None] * colours[idxs]).sum(axis=0) / T
 
-        if w_sum < 1e-12:
-            continue                    # avoid divide-by-zero
+        # Normal: principal eigenvector of sum tau * n n^T
+        n_i   = normals[idxs]                            # (K,3)
+        M     = (tau[:, None, None] * (n_i[:, :, None] * n_i[:, None, :])).sum(axis=0)  # 3x3
+        eigvals, eigvecs = np.linalg.eigh(M)
+        n_merge = eigvecs[:, np.argmax(eigvals)]
+        # Align merged normal with seed normal for consistency
+        if float(n_merge @ n0) < 0.0:
+            n_merge = -n_merge
 
-        w /= w_sum
+        # Record
+        cid = len(out_pts)
+        cluster_mapping[idxs] = cid
+        visited[idxs] = True
 
-        merged_id = len(clustered_overlap_pnts)
-        cluster_mapping[nbr_global] = merged_id
+        out_pts.append(x_merge.astype(normal_shifted_points.dtype, copy=False))
+        out_cols.append(c_merge.astype(colours.dtype, copy=False))
+        out_nrms.append(n_merge.astype(normals.dtype, copy=False))
+        out_wts.append(T)
 
-        # Weighted averages
-        clustered_overlap_pnts.append(w @ normal_shifted_points[nbr_global])
-        clustered_overlap_cols.append(w @ colours[nbr_global])
-        clustered_overlap_wts.append(conf_nbr.sum())
-
-        merged_nrm = w @ normals[nbr_global]
-        clustered_overlap_nrms.append(merged_nrm / np.linalg.norm(merged_nrm))
+    # Stack outputs
+    clustered_overlap_pnts = np.vstack(out_pts)     if out_pts else  np.zeros((0,3), dtype=normal_shifted_points.dtype)
+    clustered_overlap_cols = np.vstack(out_cols)    if out_cols else np.zeros((0,C), dtype=colours.dtype)
+    clustered_overlap_nrms = np.vstack(out_nrms)    if out_nrms else np.zeros((0,3), dtype=normals.dtype)
+    clustered_overlap_wts  = np.asarray(out_wts, dtype=weights.dtype)
 
     return (
         cluster_mapping,
-        np.vstack(clustered_overlap_pnts),
-        np.vstack(clustered_overlap_cols),
-        np.vstack(clustered_overlap_nrms),
-        np.vstack(clustered_overlap_wts),
+        clustered_overlap_pnts,
+        clustered_overlap_cols,
+        clustered_overlap_nrms,
+        clustered_overlap_wts,
     )
 
 def sanitise_mesh(V, F):
