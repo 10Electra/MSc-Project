@@ -25,7 +25,7 @@ def fuse_meshes(
     mesh2: o3d.geometry.TriangleMesh,
     h_alpha: float = 2.5,
     r_alpha: float = 2.0,
-    trilat_iters: int = 2,
+    nrm_shift_iters: int = 2,
     nrm_smth_iters: int = 1,
     shift_all: bool = False,
     fill_holes: bool = True,
@@ -105,10 +105,10 @@ def fuse_meshes(
     boundary_edges = find_boundary_edges(nonoverlap_tris)
 
     # ---------------------------------------------------------------------
-    # Trilateral point shifting
+    # Multilateral point shifting along normals
     # ---------------------------------------------------------------------
     normal_shifted_points = points.copy()
-    for _ in range(trilat_iters):
+    for _ in range(nrm_shift_iters):
         normal_shifted_points = normal_shift_smooth(normal_shifted_points, normals, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, shift_all)
     
     kd_tree = o3d.geometry.KDTreeFlann(normal_shifted_points.T)

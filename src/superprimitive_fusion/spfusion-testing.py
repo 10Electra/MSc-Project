@@ -36,7 +36,7 @@ for i in range(1,j):
         fused_mesh,
         scans[i],
         h_alpha=5,
-        trilat_iters=2,
+        nrm_shift_iters=2,
         shift_all=False,
         fill_holes=False,
     )

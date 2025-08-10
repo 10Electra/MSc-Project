@@ -479,19 +479,24 @@ def topological_trim(mesh: o3d.geometry.TriangleMesh,
 
 
 def merge_nearby_clusters(
-    normal_shifted_points: np.ndarray,
-    normals: np.ndarray,
-    weights: np.ndarray,
-    colours: np.ndarray,
-    overlap_mask: np.ndarray,
-    overlap_idx: np.ndarray,
-    global_avg_spacing: float,
-    h_alpha: float,
+    normal_shifted_points:  np.ndarray,
+    normals:                np.ndarray,
+    weights:                np.ndarray,
+    colours:                np.ndarray,
+    overlap_mask:           np.ndarray,
+    overlap_idx:            np.ndarray,
+    global_avg_spacing:     float,
+    h_alpha:                float,
     tree,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    normal_diff_thresh:     float = 45.0  # degrees; front-facing gate
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Merge nearby clusters of points in the overlap region.
-
+    Vertex density reduction by weighted vertex merging.
+    - Seed points are selected in order of descending precision
+    - Cluster neighbourhood/membership == cylindrical neighbourhood
+    around the seed; same-side-facing points only
+    - Merge operator: sum of precisions; precision-weighted means.
+    
     Args:
         points: (N, 3) array of original points.
         normal_shifted_points: (N, 3) array of shifted points.
@@ -501,17 +506,19 @@ def merge_nearby_clusters(
         overlap_mask: (N,) boolean array indicating overlap points.
         global_avg_spacing: float, global average spacing.
         h_alpha: float, parameter for find_cyl_neighbours.
-        tree: kd-tree of (all) trilaterally-shifted points
+        tree: kd-tree of (all) normal-shifted points
+        normal_diff_thresh: normal difference angle threshold for same-way-facing
 
     Returns:
-        cluster_mapping: (N,) array mapping each point to its cluster id or -1.
-        clustered_overlap_pnts: (K, 3) array of merged overlap points.
-        clustered_overlap_cols: (K, C) array of merged overlap colours.
-        clustered_overlap_nrms: (K, 3) array of merged overlap normals.
+        cluster_mapping: (N,) assigned cluster id for each input point or -1 if unclustered.
+        clustered_pnts: (K, 3)
+        clustered_cols: (K, C)
+        clustered_nrms: (K, 3)
+        clustered_wts:  (K,) precision (sum of member precisions)
     """
 
     # Convenience view limited to the overlap region (M points)
-    trilat_shifted_overlap_pts = normal_shifted_points[overlap_idx]
+    normal_shifted_overlap_pts = normal_shifted_points[overlap_idx]
 
     delta  = np.sqrt(2.0) / 2.0
     sigma  = delta * global_avg_spacing
@@ -530,7 +537,7 @@ def merge_nearby_clusters(
         free_local_idx = np.flatnonzero(cluster_mapping[overlap_idx] < 0)
         id_local       = np.random.choice(free_local_idx)
 
-        point  = trilat_shifted_overlap_pts[id_local]
+        point  = normal_shifted_overlap_pts[id_local]
         normal = normals[overlap_idx[id_local]]
 
         # Note: 'find_cyl_neighbours' returns global indices w.r.t. the full tree
