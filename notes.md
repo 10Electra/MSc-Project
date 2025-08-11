@@ -11,12 +11,14 @@
 
 - [ ] ~~Fix hole-filling normals bug~~
 
-- [ ] Implement Bayesian weight update
-- [ ] Refactor multilateral normal-shift filter for Bayesian weights
-- [ ] Refactor point merging for Bayesian weights
+- [x] Implement Bayesian weight update
+- [x] Refactor multilateral normal-shift filter for Bayesian weights
+- [x] Refactor point merging for Bayesian weights
+- [ ] Refactor the depth image creator to allow for multiple mesh input
 - [ ] Inject some noise into depth scan creation (either uniform Gaussian or Perlin or simulated MoGE-style noise)
 - [ ] Estimate Bayesian weights during depth scan creation based on that noise
 - [ ] Set up a simple noisy flat surface test to check convergence
+- [ ] Test, fix bugs and experiment with parameters
 - [ ] Start writing report
 
 - [ ] Use MoGE and SuperPrimitive to test things
@@ -169,3 +171,9 @@
   - After calculating the p(z|x) for every local z for every local x, multiply them using bayes'
 - Use the new confidences to weight a random selection in the point thinning step
   - Select N/2 points based on a confidence-weighted selection and discard the others
+
+### Revamping the rgbd scanner
+
+- Want to cut connections based on discontinuity and object id
+- Want to avoid cutting connections as much as possible though (e.g. if deleting a diagonal, check whether the other diagonal would work)
+- Possibly triangulate everythinig first using triangulate_segments() and then delete discontinuous edges?
