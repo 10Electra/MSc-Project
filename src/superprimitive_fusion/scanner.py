@@ -168,13 +168,12 @@ def virtual_scan(
     geom_ids[geom_ids > 1e2] = -1
     prim_ids = ans["primitive_ids"].numpy().astype(np.int32)
     bary_uv = ans.get("primitive_uvs", None).numpy()
-    normals = ans["primitive_normals"]
+    normals = ans["primitive_normals"].numpy()
         
     rays_np = rays.numpy()  # (H*W,6)
     origins = rays_np[..., :3]
     dirs = rays_np[..., 3:]
     verts = origins + dirs * t_hit[..., None]
-    verts = verts.reshape(-1, 3)
     
     vcols = np.full((*t_hit.shape, 3), 0.5)
 
@@ -370,7 +369,7 @@ def mesh_depth_image(
     z = np.linalg.norm((points - cam_centre), axis=2)
         
     valid_img = np.ones_like(segmentation, dtype=bool)
-    valid_img[segmentation==-1] == 0
+    valid_img[segmentation==-1] = 0
     
     tris = triangulate_rgbd_grid(
         verts=points,
@@ -383,7 +382,7 @@ def mesh_depth_image(
     ).astype(np.int32)
     
     mesh_out = o3d.geometry.TriangleMesh()
-    mesh_out.vertices = o3d.utility.Vector3dVector(points)
+    mesh_out.vertices = o3d.utility.Vector3dVector(points.reshape(-1,3))
     mesh_out.triangles = o3d.utility.Vector3iVector(tris[:, [0,2,1]])
 
     if vertex_colours is not None:
