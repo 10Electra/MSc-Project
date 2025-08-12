@@ -14,7 +14,7 @@
 - [x] Implement Bayesian weight update
 - [x] Refactor multilateral normal-shift filter for Bayesian weights
 - [x] Refactor point merging for Bayesian weights
-- [ ] Refactor the depth image creator to allow for multiple mesh input
+- [x] Refactor the depth image creator to allow for multiple mesh input
 - [ ] Inject some noise into depth scan creation (either uniform Gaussian or Perlin or simulated MoGE-style noise)
 - [ ] Estimate Bayesian weights during depth scan creation based on that noise
 - [ ] Set up a simple noisy flat surface test to check convergence

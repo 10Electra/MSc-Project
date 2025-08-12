@@ -90,16 +90,14 @@ def _interpolate_vertex_colors(
     return w[:, None] * c0 + u[:, None] * c1 + v[:, None] * c2
 
 def virtual_scan(
-        meshlist: o3d.geometry.TriangleMesh,
+        meshlist: list[o3d.geometry.TriangleMesh],
         cam_centre: tuple,
         look_dir:   tuple,
         width_px:   int = 360,
         height_px:  int = 240,
         fov:        float = 70.0,
-    ):
-    ###############
-    # Ray casting #
-    ###############
+    ) -> dict:
+
     scene = o3d.t.geometry.RaycastingScene()
 
     geom_id_list = []
@@ -398,9 +396,6 @@ def virtual_mesh_scan(
     
     return mesh
 
-###########################################################
-# Auto scan distribution                                  #
-###########################################################
 
 def fibonacci_sphere_points(n: int, radius: float) -> List[Vec3]:
     """Roughly even points on a sphere using the Fibonacci lattice."""
