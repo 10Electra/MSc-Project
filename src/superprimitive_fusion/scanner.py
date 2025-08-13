@@ -92,7 +92,7 @@ def _interpolate_vertex_colors(
 def virtual_scan(
         meshlist: list[o3d.geometry.TriangleMesh],
         cam_centre: tuple,
-        look_dir:   tuple,
+        look_at:   tuple,
         width_px:   int = 360,
         height_px:  int = 240,
         fov:        float = 70.0,
@@ -108,7 +108,7 @@ def virtual_scan(
 
     rays = o3d.t.geometry.RaycastingScene.create_rays_pinhole(
         fov_deg=fov,
-        center=list(look_dir),
+        center=list(look_at),
         eye=list(cam_centre),
         up=[0, 0, 1],
         width_px=width_px,
@@ -366,7 +366,7 @@ def mesh_depth_image(
 def virtual_mesh_scan(
     meshlist:               list[o3d.geometry.TriangleMesh],
     cam_centre:             tuple,
-    look_dir:               tuple,
+    look_at:               tuple,
     k:                      float,
     max_normal_angle_deg:   float|None,
     width_px:               int=360,
@@ -378,7 +378,7 @@ def virtual_mesh_scan(
     result = virtual_scan(
         meshlist,
         cam_centre,
-        look_dir,
+        look_at,
         width_px=width_px,
         height_px=height_px,
         fov=fov,
@@ -389,7 +389,7 @@ def virtual_mesh_scan(
         vertex_colours=result['vcols'],
         cam_centre=cam_centre,
         segmentation=result['segmt'],
-        normals=result['normals'],
+        normals=result['norms'],
         k=3.5,
         max_normal_angle_deg=max_normal_angle_deg,
     )
@@ -429,7 +429,7 @@ def capture_spherical_scans(
       - 'mesh': mesh_scan
       - 'pcd': pcd_scan (if return_pcd=True)
       - 'cam_centre': Vec3
-      - 'look_dir': Vec3
+      - 'look_at': Vec3
     """
     # Sample viewpoints
     if sampler == "fibonacci":
@@ -448,7 +448,7 @@ def capture_spherical_scans(
         mesh = virtual_mesh_scan(
             meshlist=meshlist,
             cam_centre=c,
-            look_dir=look_at,
+            look_at=look_at,
             k=k,
             max_normal_angle_deg=max_normal_angle_deg,
             width_px=width_px,
@@ -458,7 +458,7 @@ def capture_spherical_scans(
         record = {
             "mesh": mesh,
             "cam_centre": c,
-            "look_dir": look_at,
+            "look_at": look_at,
         }
         scans.append(record)
     return scans
@@ -466,7 +466,7 @@ def capture_spherical_scans(
 def render_rgb_view(
     meshes: list[o3d.geometry.TriangleMesh],
     cam_centre=(0.3, 0.3, 0.0),
-    look_dir=(0.0, 0.0, 0.0),
+    look_at=(0.0, 0.0, 0.0),
     *,
     width_px: int = 360,
     height_px: int = 240,
@@ -490,7 +490,7 @@ def render_rgb_view(
         fov, aspect, 0.01, 1000.0,
         o3d.visualization.rendering.Camera.FovType.Vertical
     )
-    cam.look_at(look_dir, cam_centre, [0, 0, 1])
+    cam.look_at(look_at, cam_centre, [0, 0, 1])
 
     # Render to image and return RGB
     img = renderer.render_to_image()

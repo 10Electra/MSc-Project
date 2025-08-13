@@ -17,7 +17,7 @@ for i in range(6):
     mesh_scan, pcd_scan = virtual_rgbd_scan(
         mesh,
         cam_centre=polar2cartesian(r=0.3, lat=60, long=0+60*i),
-        look_dir=(0, 0, 0),
+        look_at=(0, 0, 0),
         width_px=180,
         height_px=120,
         fov=70,
