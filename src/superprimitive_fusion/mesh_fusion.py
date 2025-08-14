@@ -9,6 +9,7 @@ from superprimitive_fusion.mesh_fusion_utils import (
     compute_overlap_set_cached,
     smooth_overlap_set_cached,
     precompute_cyl_neighbours,
+    update_weights,
     normal_shift_smooth,
     find_boundary_edges,
     topological_trim,
@@ -54,7 +55,8 @@ def fuse_meshes(
     pointclouds = (points1, points2)
     points = np.vstack(pointclouds)
     
-    assert weights1.ndim == 1 and weights2.ndim == 1
+    assert weights1.ndim == 1 and len(weights1) == len(mesh1.vertices)
+    assert weights2.ndim == 1 and len(weights2) == len(mesh2.vertices)
     weights = np.concatenate((weights1, weights2))
 
     colours1 = mesh1.vertex_colors
@@ -111,6 +113,21 @@ def fuse_meshes(
     boundary_edges = find_boundary_edges(nonoverlap_tris)
 
     # ---------------------------------------------------------------------
+    # Update weights
+    # ---------------------------------------------------------------------
+    updated_weights = update_weights(
+        points,
+        normals,
+        weights,
+        overlap_mask,
+        scan_ids,
+        nbr_cache,
+        normal_diff_thresh=45.0,
+        huber_delta=1.345,
+        tau_max=None,
+    )
+
+    # ---------------------------------------------------------------------
     # Multilateral point shifting along normals
     # ---------------------------------------------------------------------
     normal_shifted_points = points.copy()
@@ -125,7 +142,7 @@ def fuse_meshes(
     merged_out = merge_nearby_clusters(
         normal_shifted_points=normal_shifted_points,
         normals=normals,
-        weights=weights,
+        weights=updated_weights,
         colours=colours,
         overlap_mask=overlap_mask,
         overlap_idx=overlap_idx,
@@ -135,7 +152,7 @@ def fuse_meshes(
     )
     
     # Unpack merge output
-    cluster_mapping, clustered_overlap_pnts, clustered_overlap_cols, clustered_overlap_nrms, clustered_wts = merged_out
+    cluster_mapping, clustered_overlap_pnts, clustered_overlap_cols, clustered_overlap_nrms, clustered_overlap_wts = merged_out
 
     # ---------------------------------------------------------------------
     # Classify vertices
@@ -181,7 +198,7 @@ def fuse_meshes(
     )
     new_weights = np.concatenate(
         [
-            clustered_wts,
+            clustered_overlap_wts,
             weights[border_mask],
             weights[nonoverlap_nonborder_mask],
         ],
@@ -206,19 +223,6 @@ def fuse_meshes(
     # ---------------------------------------------------------------------
     # Mesh the overlap zone
     # ---------------------------------------------------------------------
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(new_points[:n_overlap])
-
-    if new_normals[:n_overlap] is not None:
-        pcd.normals = o3d.utility.Vector3dVector(new_normals[:n_overlap])
-    else:
-        pcd.estimate_normals(
-            search_param=o3d.geometry.KDTreeSearchParamHybrid(
-                radius=2.5 * global_avg_spacing, max_nn=30
-            )
-        )
-        pcd.orient_normals_consistent_tangent_plane(k=30)
-
     def density_aware_radii(pcd: o3d.geometry.PointCloud, k=10):
         pts = np.asarray(pcd.points)
         kdt = o3d.geometry.KDTreeFlann(pcd)
@@ -231,6 +235,19 @@ def fuse_meshes(
         r_mid = h50
         r_max = 1.2 * h90
         return [r_min, r_mid, r_max]
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(new_points[:n_overlap])
+
+    if new_normals[:n_overlap] is not None:
+        pcd.normals = o3d.utility.Vector3dVector(new_normals[:n_overlap])
+    else:
+        pcd.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                radius=2.5 * global_avg_spacing, max_nn=30
+            )
+        )
+        pcd.orient_normals_consistent_tangent_plane(k=30)
 
     radii = o3d.utility.DoubleVector(density_aware_radii(pcd, k=10))
     pcd.estimate_normals(o3d.geometry.KDTreeSearchParamKNN(40))
@@ -249,7 +266,6 @@ def fuse_meshes(
         pcd, radii
     )
 
-    overlap_mesh.remove_duplicated_vertices()
     overlap_mesh.remove_duplicated_triangles()
     overlap_mesh.remove_degenerate_triangles()
     overlap_mesh.remove_non_manifold_edges()
@@ -263,10 +279,10 @@ def fuse_meshes(
         np.all(mapped_boundary_edges < len(overlap_mesh.vertices), axis=1)
     ]
 
-    k = len(overlap_mesh.cluster_connected_triangles()[1])
+    Ncc = len(overlap_mesh.cluster_connected_triangles()[1])
 
     trimmed_overlap_mesh = topological_trim(
-        overlap_mesh, relevant_boundary_edges, k=k,
+        overlap_mesh, relevant_boundary_edges, k=Ncc,
     )
 
     # ---------------------------------------------------------------------

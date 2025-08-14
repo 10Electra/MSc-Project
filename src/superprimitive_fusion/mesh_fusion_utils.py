@@ -806,3 +806,80 @@ def show_mesh_boundaries(mesh: o3d.geometry.TriangleMesh, show: bool = True, edg
     if show:
         o3d.visualization.draw_geometries(geoms)
     return geoms
+
+
+def update_weights(
+        points: np.ndarray,
+        normals:            np.ndarray,
+        weights:            np.ndarray,
+        overlap_mask:       np.ndarray,
+        scan_ids:           np.ndarray,
+        nbr_cache:          np.ndarray,
+        normal_diff_thresh: float       =45.0,
+        huber_delta:        float|None  =1.345,
+        tau_max:            float|None  =None,
+    ) -> np.ndarray:
+
+    weights_out = weights.copy()
+
+    fresh_scan_id = scan_ids.max()
+    fresh_scan_mask = scan_ids == fresh_scan_id
+    overlap_measurement_mask = fresh_scan_mask & overlap_mask
+
+    for i in np.flatnonzero(overlap_measurement_mask):
+        z   = points[i]
+        n_z = normals[i]
+        
+        nbrs = nbr_cache[i]
+        ixs  = nbrs[~fresh_scan_mask[nbrs]] # ids of non-measurement neighbours
+        
+        # Non-measurement neighbours and their normals
+        xs   = points[ixs]
+        n_xs = normals[ixs]
+        
+        # Normalise both sets of normals
+        n_z = n_z / (np.linalg.norm(n_z) + 1e-12)
+        n_xs = n_xs / (np.linalg.norm(n_xs, axis=1, keepdims=True) + 1e-12)
+
+        # Calculate z<->x compatibility based on angle between normals
+        cos_th = np.cos(np.deg2rad(normal_diff_thresh))
+        dots   = (n_xs @ n_z)
+        mask = dots >= cos_th
+        
+        if not np.any(mask):
+            continue # Skip this measurement if there are no compatible current values
+        
+        ixs  = ixs[mask]
+        n_xs = n_xs[mask]
+        xs   = xs[mask]
+        
+        # Calculate point-to-plane residuals (z to x's plane)
+        rs = np.einsum('ij,ij->i', n_xs, xs - z)
+        
+        # Pull out precision (== weight == inverse covariance) for the points
+        tau_z   = weights[i]
+        sigma_z = 1.0 / np.sqrt(max(1e-12, tau_z))
+
+        # Huber loss robustness measure to decrease the effect of outliers
+        t = np.abs(rs) / sigma_z
+        keep = t <= 3.0 # Ignore massively outlying associations
+        if not np.any(keep):
+            continue
+        
+        w = np.ones_like(t)
+        if huber_delta is not None:
+            far = t > huber_delta
+            w[far] = huber_delta / t[far]
+        
+        # Calculate likelihoods and responsibilities
+        ls = np.exp(-0.5 * (t**2)) * w
+        resp = ls / (ls.sum() + 1e-12)
+        
+        # Update weights of non-new points x based on Bayesian update using new points z
+        w_xs = weights_out[ixs]
+        weights_out[ixs] = w_xs + resp * tau_z
+        
+    if tau_max is not None:
+        weights_out = np.clip(weights_out, None, tau_max)
+        
+    return weights_out
