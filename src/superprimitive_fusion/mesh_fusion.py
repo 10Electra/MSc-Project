@@ -22,7 +22,9 @@ from line_profiler import profile
 @profile
 def fuse_meshes(
     mesh1: o3d.geometry.TriangleMesh,
+    weights1: np.ndarray,
     mesh2: o3d.geometry.TriangleMesh,
+    weights2: np.ndarray,
     h_alpha: float = 2.5,
     r_alpha: float = 2.0,
     nrm_shift_iters: int = 2,
@@ -35,6 +37,7 @@ def fuse_meshes(
     Args:
         mesh1 (o3d.geometry.TriangleMesh): first mesh to fuse
         mesh2 (o3d.geometry.TriangleMesh): second mesh to fuse
+        weights(1|2) (np.ndarray): weight (==1/sigma_z^2) for each vertex. (N,)
         h_alpha (float, optional): h_alpha * local_spacing = cylinder search region height. Defaults to 2.5.
         r_alpha (float, optional): r_alpha * local_spacing = cylinder search region radius. Defaults to 2.0.
 
@@ -50,6 +53,9 @@ def fuse_meshes(
 
     pointclouds = (points1, points2)
     points = np.vstack(pointclouds)
+    
+    assert weights1.ndim == 1 and weights2.ndim == 1
+    weights = np.concatenate((weights1, weights2))
 
     colours1 = mesh1.vertex_colors
     colours2 = mesh2.vertex_colors
@@ -109,16 +115,17 @@ def fuse_meshes(
     # ---------------------------------------------------------------------
     normal_shifted_points = points.copy()
     for _ in range(nrm_shift_iters):
-        normal_shifted_points = normal_shift_smooth(normal_shifted_points, normals, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, shift_all)
+        normal_shifted_points = normal_shift_smooth(normal_shifted_points, normals, weights, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, shift_all)
     
     kd_tree = o3d.geometry.KDTreeFlann(normal_shifted_points.T)
 
     # ---------------------------------------------------------------------
     # Merge nearby clusters
     # ---------------------------------------------------------------------
-    cluster_mapping, clustered_overlap_pnts, clustered_overlap_cols, clustered_overlap_nrms = merge_nearby_clusters(
+    merged_out = merge_nearby_clusters(
         normal_shifted_points=normal_shifted_points,
         normals=normals,
+        weights=weights,
         colours=colours,
         overlap_mask=overlap_mask,
         overlap_idx=overlap_idx,
@@ -126,6 +133,9 @@ def fuse_meshes(
         h_alpha=h_alpha,
         tree=kd_tree,
     )
+    
+    # Unpack merge output
+    cluster_mapping, clustered_overlap_pnts, clustered_overlap_cols, clustered_overlap_nrms, clustered_wts = merged_out
 
     # ---------------------------------------------------------------------
     # Classify vertices
@@ -166,6 +176,14 @@ def fuse_meshes(
             clustered_overlap_nrms,
             normals[border_mask],
             normals[nonoverlap_nonborder_mask],
+        ],
+        axis=0,
+    )
+    new_weights = np.concatenate(
+        [
+            clustered_wts,
+            weights[border_mask],
+            weights[nonoverlap_nonborder_mask],
         ],
         axis=0,
     )
@@ -277,7 +295,7 @@ def fuse_meshes(
 
     if not fill_holes:
         fused_mesh.compute_vertex_normals()
-        return fused_mesh
+        return fused_mesh, new_weights
 
     V0, F0 = sanitise_mesh(new_points, fused_mesh_triangles)
     C0 = new_colours
@@ -297,7 +315,7 @@ def fuse_meshes(
     repaired.vertex_colors = o3d.utility.Vector3dVector(C1)
     repaired.compute_vertex_normals()
     
-    return repaired
+    return repaired, new_weights
 
 
 if __name__ == "__main__":

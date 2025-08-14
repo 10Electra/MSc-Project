@@ -314,6 +314,7 @@ def triangulate_rgbd_grid(
 
 def mesh_depth_image(
         points:         np.ndarray,
+        weights:        np.ndarray,
         vertex_colours: np.ndarray,
         cam_centre:     np.ndarray | tuple,
         segmentation:   np.ndarray | None = None,
@@ -334,7 +335,7 @@ def mesh_depth_image(
     valid_img = np.ones_like(segmentation, dtype=bool)
     valid_img[segmentation==-1] = 0
     
-    tris = triangulate_rgbd_grid(
+    tris_grid = triangulate_rgbd_grid(
         verts=points,
         valid=valid_img,
         z=z,
@@ -344,23 +345,33 @@ def mesh_depth_image(
         max_normal_angle_deg=max_normal_angle_deg,
     ).astype(np.int32)
     
+    ref_idx = np.unique(tris_grid.reshape(-1))
+    old2new = -np.ones(points.size//3, np.int64)
+    old2new[ref_idx] = np.arange(ref_idx.size)
+
+    V_compact = points.reshape(-1,3)[ref_idx]
+    w_compact = weights.reshape(-1)[ref_idx]
+
+    tris_new = old2new[tris_grid]
+
     mesh_out = o3d.geometry.TriangleMesh()
-    mesh_out.vertices = o3d.utility.Vector3dVector(points.reshape(-1,3))
-    mesh_out.triangles = o3d.utility.Vector3iVector(tris[:, [0,2,1]])
+    mesh_out.vertices = o3d.utility.Vector3dVector(V_compact)
+    mesh_out.triangles = o3d.utility.Vector3iVector(tris_new[:, [0,2,1]])
 
     if vertex_colours is not None:
-        mesh_out.vertex_colors = o3d.utility.Vector3dVector(vertex_colours.reshape(-1,3))
+        C_compact = vertex_colours.reshape(-1,3)[ref_idx]
+        mesh_out.vertex_colors = o3d.utility.Vector3dVector(C_compact)
 
     #############################
     # Clean‑up / post‑processing#
     #############################
-    mesh_out.remove_unreferenced_vertices()
-    mesh_out.remove_degenerate_triangles()
-    mesh_out.remove_duplicated_triangles()
-    mesh_out.remove_non_manifold_edges()
-    mesh_out.compute_vertex_normals()
+    # mesh_out.remove_unreferenced_vertices()
+    # mesh_out.remove_degenerate_triangles()
+    # mesh_out.remove_duplicated_triangles()
+    # mesh_out.remove_non_manifold_edges()
+    # mesh_out.compute_vertex_normals()
 
-    return mesh_out
+    return mesh_out, w_compact
 
 
 def virtual_mesh_scan(
