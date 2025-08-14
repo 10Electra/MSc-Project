@@ -90,13 +90,16 @@ def _interpolate_vertex_colors(
     return w[:, None] * c0 + u[:, None] * c1 + v[:, None] * c2
 
 def virtual_scan(
-        meshlist: list[o3d.geometry.TriangleMesh],
-        cam_centre: tuple,
-        look_at:   tuple,
+        meshlist:   list[o3d.geometry.TriangleMesh],
+        cam_centre: np.ndarray | tuple,
+        look_at:    np.ndarray | tuple,
         width_px:   int = 360,
         height_px:  int = 240,
         fov:        float = 70.0,
     ) -> dict:
+
+    cam_centre_lst  = list(cam_centre) if isinstance(cam_centre, tuple) else cam_centre.tolist()
+    look_at_lst     = list(look_at)    if isinstance(look_at, tuple)    else look_at.tolist()
 
     scene = o3d.t.geometry.RaycastingScene()
 
@@ -108,8 +111,8 @@ def virtual_scan(
 
     rays = o3d.t.geometry.RaycastingScene.create_rays_pinhole(
         fov_deg=fov,
-        center=list(look_at),
-        eye=list(cam_centre),
+        center=look_at_lst,
+        eye=cam_centre_lst,
         up=[0, 0, 1],
         width_px=width_px,
         height_px=height_px,
@@ -149,6 +152,179 @@ def virtual_scan(
     scan['segmt'] = geom_ids
     
     return scan
+
+
+def triangulate_rgbd_grid_grouped(verts, valid, z, obj_id,
+                                  k=3.5, normals=None, max_normal_angle_deg=None):
+    """
+    Output: list of (Ni,3) int32 arrays. Index i corresponds to object_id == i.
+            Unknown id == -1 is skipped.
+    """
+    # --- reshape ---
+    if verts.ndim == 2:
+        N = verts.shape[0]
+        H = int(np.round(np.sqrt(N)))
+        W = N // H
+        P = verts.reshape(H, W, 3)
+    else:
+        H, W, _ = verts.shape
+        P = verts
+    valid_img = valid.reshape(H, W)
+    z_img = z.reshape(H, W)
+    obj_id = obj_id.reshape(H, W).astype(np.int32)
+
+    # --- disparity + robust thresholds ---
+    disp = np.zeros_like(z_img, dtype=np.float32)
+    m = valid_img & np.isfinite(z_img) & (z_img > 0)
+    disp[m] = 1.0 / z_img[m]
+
+    dx  = np.abs(disp[:, 1:] - disp[:, :-1])
+    dy  = np.abs(disp[1:, :] - disp[:-1, :])
+    dd1 = np.abs(disp[:-1, :-1] - disp[1:, 1:])    # tl-br
+    dd2 = np.abs(disp[:-1, 1:]  - disp[1:, :-1])   # tr-bl
+
+    mask_x  = valid_img[:, 1:] & valid_img[:, :-1]
+    mask_y  = valid_img[1:, :] & valid_img[:-1, :]
+    mask_d1 = valid_img[:-1, :-1] & valid_img[1:, 1:]
+    mask_d2 = valid_img[:-1, 1:]  & valid_img[1:, :-1]
+
+    vals = np.concatenate([
+        dx[mask_x].ravel(), dy[mask_y].ravel(),
+        (dd1[mask_d1] / np.sqrt(2)).ravel(),
+        (dd2[mask_d2] / np.sqrt(2)).ravel()
+    ])
+    if vals.size:
+        med = np.median(vals)
+        mad = 1.4826 * np.median(np.abs(vals - med))
+        base_thr = med + k * mad if mad > 0 else med * 1.5
+    else:
+        base_thr = np.inf
+    thr_x, thr_y, thr_d = base_thr, base_thr, base_thr * np.sqrt(2)
+
+    # --- object gates (unknown == -1 → cut) ---
+    same_x  = (obj_id[:, 1:] == obj_id[:, :-1]) & (obj_id[:, 1:] >= 0)
+    same_y  = (obj_id[1:, :] == obj_id[:-1, :]) & (obj_id[1:, :] >= 0)
+    same_d1 = (obj_id[:-1, :-1] == obj_id[1:, 1:]) & (obj_id[:-1, :-1] >= 0)
+    same_d2 = (obj_id[:-1, 1:]  == obj_id[1:, :-1]) & (obj_id[:-1, 1:]  >= 0)
+
+    # --- base edge validity ---
+    good_x  = mask_x  & same_x  & (dx  <= thr_x)
+    good_y  = mask_y  & same_y  & (dy  <= thr_y)
+    good_d1 = mask_d1 & same_d1 & (dd1 <= thr_d)
+    good_d2 = mask_d2 & same_d2 & (dd2 <= thr_d)
+
+    # --- optional normal-angle gate ---
+    if (normals is not None) and (max_normal_angle_deg is not None):
+        n = normals.reshape(H, W, 3).astype(np.float32)
+        n_norm = np.linalg.norm(n, axis=-1, keepdims=True)
+        ok = n_norm[..., 0] > 0
+        n = np.where(ok[..., None], n / np.clip(n_norm, 1e-12, None), 0.0)
+
+        cos_max = np.cos(np.deg2rad(max_normal_angle_deg))
+        dot_x  = (n[:, 1:, :] * n[:, :-1, :]).sum(-1)
+        dot_y  = (n[1:, :, :] * n[:-1, :, :]).sum(-1)
+        dot_d1 = (n[:-1, :-1, :] * n[1:, 1:, :]).sum(-1)
+        dot_d2 = (n[:-1, 1:, :]  * n[1:, :-1, :]).sum(-1)
+
+        n_ok_x  = ok[:, 1:]  & ok[:, :-1]
+        n_ok_y  = ok[1:, :]  & ok[:-1, :]
+        n_ok_d1 = ok[:-1, :-1] & ok[1:, 1:]
+        n_ok_d2 = ok[:-1, 1:]  & ok[1:, :-1]
+
+        good_x  &= n_ok_x  & (dot_x  >= cos_max)
+        good_y  &= n_ok_y  & (dot_y  >= cos_max)
+        good_d1 &= n_ok_d1 & (dot_d1 >= cos_max)
+        good_d2 &= n_ok_d2 & (dot_d2 >= cos_max)
+
+    # --- per-quad indices ---
+    id_img = np.arange(H * W, dtype=np.int32).reshape(H, W)
+    tl = id_img[:-1, :-1]; tr = id_img[:-1, 1:]
+    bl = id_img[1:, :-1];  br = id_img[1:, 1:]
+
+    # per-quad edges
+    e_top    = good_x[:H-1, :W-1]
+    e_bottom = good_x[1:,  :W-1]
+    e_left   = good_y[:H-1, :W-1]
+    e_right  = good_y[:H-1, 1:]
+    d1, d2 = good_d1, good_d2
+
+    # candidate triangles by diagonal
+    A = e_top & e_right & d1            # (tl,tr,br)
+    B = e_left & e_bottom & d1          # (tl,br,bl)
+    C = e_top & e_left & d2             # (tl,tr,bl)
+    D = e_right & e_bottom & d2         # (tr,br,bl)
+
+    # orientation selection (prefer keeping more tris; tie → shorter 3D diagonal)
+    count1 = A.astype(np.uint8) + B.astype(np.uint8)
+    count2 = C.astype(np.uint8) + D.astype(np.uint8)
+
+    d1_len2 = np.full((H-1, W-1), np.inf, dtype=P.dtype)
+    d2_len2 = np.full((H-1, W-1), np.inf, dtype=P.dtype)
+    fin_d1 = np.isfinite(P[:-1, :-1, :]).all(-1) & np.isfinite(P[1:, 1:, :]).all(-1)
+    if fin_d1.any():
+        diff = P[:-1, :-1, :][fin_d1] - P[1:, 1:, :][fin_d1]
+        d1_len2[fin_d1] = (diff * diff).sum(-1)
+    fin_d2 = np.isfinite(P[:-1, 1:, :]).all(-1) & np.isfinite(P[1:, :-1, :]).all(-1)
+    if fin_d2.any():
+        diff = P[:-1, 1:, :][fin_d2] - P[1:, :-1, :][fin_d2]
+        d2_len2[fin_d2] = (diff * diff).sum(-1)
+
+    prefer_d1 = (count1 > count2) | ((count1 == count2) & (d1_len2 <= d2_len2))
+    A &= prefer_d1; B &= prefer_d1
+    C &= ~prefer_d1; D &= ~prefer_d1
+
+    # --- pack triangles + labels (label from any vertex in the tri; they’re equal by construction) ---
+    lab_tl = obj_id[:-1, :-1]
+    lab_tr = obj_id[:-1, 1:]
+    # lab_bl = obj_id[1:, :-1]
+    # lab_br = obj_id[1:, 1:]
+
+    tris_list, labels_list = [], []
+
+    def pack(mask, i0, i1, i2, lab_grid):
+        if mask.any():
+            tris_list.append(np.stack([i0[mask], i1[mask], i2[mask]], axis=1))
+            labels_list.append(lab_grid[mask].astype(np.int32))
+
+    pack(A, tl, br, tr, lab_tl)  # (tl,br,tr) → label from tl
+    pack(B, tl, bl, br, lab_tl)  # (tl,bl,br) → label from tl
+    pack(C, tl, bl, tr, lab_tl)  # (tl,bl,tr) → label from tl
+    pack(D, tr, bl, br, lab_tr)  # (tr,bl,br) → label from tr
+
+    if not tris_list:
+        # no triangles at all; build empty list sized by max obj id
+        max_obj = int(obj_id.max())
+        return [] if max_obj < 0 else [np.empty((0, 3), dtype=np.int32) for _ in range(max_obj + 1)]
+
+    tris_all   = np.concatenate(tris_list, axis=0).astype(np.int32)
+    labels_all = np.concatenate(labels_list, axis=0)
+
+    # drop unknown ids
+    keep = labels_all >= 0
+    tris_all = tris_all[keep]
+    labels_all = labels_all[keep]
+
+    # size output by maximum declared object id (so objects with 0 tris still get an empty array)
+    max_obj = int(obj_id.max())
+    if max_obj < 0:
+        return []
+
+    object_tris = [np.empty((0, 3), dtype=np.int32) for _ in range(max_obj + 1)]
+    if labels_all.size == 0:
+        return object_tris
+
+    # group by label (vectorized; no per-triangle Python loops)
+    order = np.argsort(labels_all, kind='mergesort')
+    labels_sorted = labels_all[order]
+    tris_sorted = tris_all[order]
+
+    ids, starts, counts = np.unique(labels_sorted, return_index=True, return_counts=True)
+    for obj, s, c in zip(ids, starts, counts):
+        if obj >= 0:
+            object_tris[int(obj)] = tris_sorted[s:s + c]
+
+    return object_tris
+
 
 def triangulate_rgbd_grid(
     verts:  np.ndarray,
@@ -313,29 +489,66 @@ def triangulate_rgbd_grid(
 
 
 def mesh_depth_image(
-        points:         np.ndarray,
-        weights:        np.ndarray,
-        vertex_colours: np.ndarray,
-        cam_centre:     np.ndarray | tuple,
-        segmentation:   np.ndarray | None = None,
-        normals:        np.ndarray | None = None,
-        k = 3.5,
-        max_normal_angle_deg: float | None = None,
-    ) -> o3d.geometry.TriangleMesh:
-    assert points.ndim == 3
-    if vertex_colours.ndim == 3:
-        vertex_colours = vertex_colours.reshape(-1, 3)
-    if segmentation is not None:
-        assert segmentation.ndim == 2
+    points:         np.ndarray,                 # (H,W,3)
+    weights:        np.ndarray,                 # (H,W) or (H*W,)
+    vertex_colours: np.ndarray | None,          # (H,W,3) or (H*W,3) or None
+    look_dir:       np.ndarray | None,          # (3,)
+    cam_centre:     np.ndarray | tuple,         # (3,)
+    segmentation:   np.ndarray | None = None,   # (H,W) int; unknown == -1
+    normals:        np.ndarray | None = None,   # (H,W,3) or None
+    k:              float = 3.5,
+    max_normal_angle_deg: float | None = None,
+):
+    """
+    Returns:
+        meshes:       list[o3d.geometry.TriangleMesh]  (index i == object_id i)
+        weights_list: list[np.ndarray]                 (per-mesh compact vertex weights)
+    Notes:
+      - Triangles are built per object id via triangulate_rgbd_grid_grouped(...).
+      - Inf/NaN pixels are ignored by the triangulator; they never appear in meshes.
+      - Winding is left as produced by the triangulator; flip if your renderer requires it.
+    """
+    assert points.ndim == 3 and points.shape[2] == 3
+    H, W, _ = points.shape
+    N = H * W
+
+    # Flatten colors to (N,3) if provided
+    if vertex_colours is not None:
+        if vertex_colours.ndim == 3:
+            vertex_colours = vertex_colours.reshape(-1, 3)
+        else:
+            assert vertex_colours.shape == (N, 3)
+
+    # Flatten weights to (N,)
+    if weights.ndim == 2:
+        weights = weights.reshape(-1)
+    else:
+        assert weights.shape == (N,)
+
+    # Segmentation: default single object 0; drop unknown == -1
+    if segmentation is None:
+        segmentation = np.zeros((H, W), dtype=np.int32)
+    else:
+        assert segmentation.shape == (H, W)
+        segmentation = segmentation.astype(np.int32, copy=False)
+
+    # Normals (only used by triangulation if given)
     if normals is not None:
-        assert normals.ndim == 3
-        
-    z = np.linalg.norm((points - cam_centre), axis=2)
-        
-    valid_img = np.ones_like(segmentation, dtype=bool)
-    valid_img[segmentation==-1] = 0
-    
-    tris_grid = triangulate_rgbd_grid(
+        assert normals.shape == (H, W, 3)
+
+    # Validity mask (finite and not unknown)
+    valid_img = np.isfinite(points).all(axis=2) & (segmentation != -1)
+
+    # Depth proxy for triangulation (Euclidean range; keeps signature drop-in)
+    if look_dir is None:
+        z = np.linalg.norm(points - np.asarray(cam_centre, dtype=points.dtype), axis=2)
+    else:
+        assert look_dir.shape == (3,)
+        L = look_dir / np.linalg.norm(look_dir)
+        z = ((points - cam_centre) @ L).clip(min=0.0) # (H,W)
+
+    # Per-object triangulation in grid index space (indices in [0..H*W))
+    object_tris = triangulate_rgbd_grid_grouped(
         verts=points,
         valid=valid_img,
         z=z,
@@ -343,50 +556,82 @@ def mesh_depth_image(
         k=k,
         normals=normals,
         max_normal_angle_deg=max_normal_angle_deg,
-    ).astype(np.int32)
-    
-    ref_idx = np.unique(tris_grid.reshape(-1))
-    old2new = -np.ones(points.size//3, np.int64)
-    old2new[ref_idx] = np.arange(ref_idx.size)
+    )
 
-    V_compact = points.reshape(-1,3)[ref_idx]
-    w_compact = weights.reshape(-1)[ref_idx]
+    P_flat = points.reshape(-1, 3)
+    W_flat = weights
+    meshes: list[o3d.geometry.TriangleMesh] = []
+    weights_list: list[np.ndarray] = []
 
-    tris_new = old2new[tris_grid]
+    # Fast O(E) remap: global index_map reused per object
+    index_map = np.full(N, -1, dtype=np.int64)
 
-    mesh_out = o3d.geometry.TriangleMesh()
-    mesh_out.vertices = o3d.utility.Vector3dVector(V_compact)
-    mesh_out.triangles = o3d.utility.Vector3iVector(tris_new[:, [0,2,1]])
+    for tris in object_tris:
+        if tris.size == 0:
+            meshes.append(o3d.geometry.TriangleMesh())
+            weights_list.append(np.empty((0,), dtype=weights.dtype))
+            continue
 
-    if vertex_colours is not None:
-        C_compact = vertex_colours.reshape(-1,3)[ref_idx]
-        mesh_out.vertex_colors = o3d.utility.Vector3dVector(C_compact)
+        tris = np.asarray(tris, dtype=np.int64, order='C')     # (M,3), grid indices
 
-    #############################
-    # Clean‑up / post‑processing#
-    #############################
-    # mesh_out.remove_unreferenced_vertices()
-    # mesh_out.remove_degenerate_triangles()
-    # mesh_out.remove_duplicated_triangles()
-    # mesh_out.remove_non_manifold_edges()
-    # mesh_out.compute_vertex_normals()
+        # Unique referenced grid pixels (sorted)
+        ref_idx = np.unique(tris.ravel())                      # (V_o,)
 
-    return mesh_out, w_compact
+        # Compact vertices/weights/colors in the same order
+        V = P_flat[ref_idx]
+        w = W_flat[ref_idx]
+        if vertex_colours is not None:
+            C = vertex_colours[ref_idx]
+        else:
+            C = None
+
+        # Old(grid)->new(compact) remap in O(1)
+        index_map[ref_idx] = np.arange(ref_idx.size, dtype=np.int64)
+        tris_compact = index_map[tris]                          # (M,3), compact indices
+        index_map[ref_idx] = -1                                 # reset touched entries
+
+        # Build mesh
+        m = o3d.geometry.TriangleMesh()
+        m.vertices  = o3d.utility.Vector3dVector(V.astype(np.float64, copy=False))
+        m.triangles = o3d.utility.Vector3iVector(tris_compact.astype(np.int32, copy=False))
+        if C is not None:
+            m.vertex_colors = o3d.utility.Vector3dVector(C.astype(np.float64, copy=False))
+
+        meshes.append(m)
+        weights_list.append(w.astype(weights.dtype, copy=False))
+
+    return meshes, weights_list
+
+
+def clean_mesh_and_remap_weights(mesh, w):
+    mesh.remove_degenerate_triangles()
+    mesh.remove_duplicated_triangles()
+    mesh.remove_non_manifold_edges()
+
+    tris = np.asarray(mesh.triangles, dtype=np.int64)
+    ref = np.zeros(len(mesh.vertices), dtype=bool)
+    if tris.size:
+        ref[tris.ravel()] = True
+
+    mesh.remove_vertices_by_mask(~ref)
+    w = w[ref]
+    mesh.compute_vertex_normals()
+    return mesh, w
 
 
 def generate_rgbd_noise(
-    verts_img: np.ndarray,                 # (H,W,3) or (N,3); may contain inf/NaN
+    verts_img:  np.ndarray,                 # (H,W,3) or (N,3); may contain inf/NaN
     cam_centre: np.ndarray | tuple,
     look_dir:   np.ndarray | tuple,
-    normals_img: np.ndarray | None = None, # same layout as verts if provided
+    normals_img:np.ndarray | None = None,   # same layout as verts if provided
     *,
     # axial noise model: sigma_z = (alpha*d + beta*d^2) * (1 + lambda*(1-cos(theta)))
-    alpha: float = 2e-4,
-    beta:  float = 2e-4,
+    alpha:          float = 2e-4,
+    beta:           float = 2e-4,
     grazing_lambda: float = 1.0,
-    sigma_floor: float = 1e-4,            # meters; avoid huge weights
+    sigma_floor:    float = 1e-4,           # meters; avoid huge weights
     # optional low-frequency radial bias (kept out of sigma)
-    bias_k1: float = 0.0,                 # 0 disables; try 0.01–0.02 for mild bow
+    bias_k1: float = 0.0,                   # 0 disables; try 0.01–0.02 for mild bow
     fov_deg: float = 70.0,
     seed: int | None = None,
 ):
@@ -469,43 +714,74 @@ def generate_rgbd_noise(
     # Write back into a copy, preserving invalid pixels as-is (inf/NaN)
     V_out = V_flat.copy()
     V_out[valid] = (Vv + disp).astype(orig_dtype, copy=False)
-    V_out = V_out.reshape(V.shape)
+    V_out_img = V_out.reshape(V.shape)
 
     # Per-vertex precision from axial jitter only; 0 for invalid
     w = np.zeros(V_flat.shape[0], dtype=np.float32)
     w[valid] = (1.0 / (sigma_z ** 2)).astype(np.float32)
 
     weights = w.reshape(V.shape[:2] if is_image else (-1,))
-    return V_out, weights
+    
+    return V_out_img, weights
 
 
 def virtual_mesh_scan(
     meshlist:               list[o3d.geometry.TriangleMesh],
-    cam_centre:             tuple,
-    look_at:               tuple,
+    cam_centre:             np.ndarray | tuple,
+    look_at:                np.ndarray | tuple,
     k:                      float,
     max_normal_angle_deg:   float|None,
     width_px:               int=360,
     height_px:              int=240,
     fov:                    float=70,
+    linear_depth_sigma:     float=0.0002,   # linear depth term (≈ 2% of depth)
+    quadrt_depth_sigma:     float=0.0002,   # quadratic depth term
+    sigma_floor:            float=0.00015,  # prevents infinite weights
+    grazing_lambda:         float=1.0,      # sigma multiplier at grazing angles; 0 disables
+    bias_k1:                float=0.0,      # e.g., 0.01–0.03 for mild bowing
+    fov_deg:                float=70.0,     # only needed if bias_k1 != 0
+    seed = None,
 ) -> o3d.geometry.TriangleMesh:
     """Easy call to virtual_scan() and mesh_depth_mage()"""
+
+    cam_centre_np = np.asarray(cam_centre) if isinstance(cam_centre, tuple) else cam_centre
+    look_at_np = np.asarray(look_at) if isinstance(look_at, tuple) else look_at
     
-    result = virtual_scan(
+    scan_result = virtual_scan(
         meshlist,
-        cam_centre,
-        look_at,
+        cam_centre_np,
+        look_at_np,
         width_px=width_px,
         height_px=height_px,
         fov=fov,
     )
 
-    mesh = mesh_depth_image(
-        points=result['verts'],
-        vertex_colours=result['vcols'],
+    look_dir = look_at_np - cam_centre_np
+    look_dir = look_dir / (np.linalg.norm(look_dir) + 1e-12)
+    
+    verts_noised, weights = generate_rgbd_noise(
+        verts_img=scan_result['verts'],
         cam_centre=cam_centre,
-        segmentation=result['segmt'],
-        normals=result['norms'],
+        look_dir=look_dir,
+        normals_img=scan_result['norms'],
+        
+        alpha           = linear_depth_sigma,
+        beta            = quadrt_depth_sigma,
+        grazing_lambda  = grazing_lambda,
+        sigma_floor     = sigma_floor,
+        bias_k1         = bias_k1,
+        fov_deg         = fov_deg,
+        seed            = seed,
+    )
+
+    mesh = mesh_depth_image(
+        points=verts_noised,
+        weights=weights,
+        vertex_colours=scan_result['vcols'],
+        look_dir=look_dir,
+        cam_centre=cam_centre_np,
+        segmentation=scan_result['segmt'],
+        normals=scan_result['norms'],
         k=3.5,
         max_normal_angle_deg=max_normal_angle_deg,
     )
