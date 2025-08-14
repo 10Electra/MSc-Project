@@ -374,6 +374,111 @@ def mesh_depth_image(
     return mesh_out, w_compact
 
 
+def generate_rgbd_noise(
+    verts_img: np.ndarray,                 # (H,W,3) or (N,3); may contain inf/NaN
+    cam_centre: np.ndarray | tuple,
+    look_dir:   np.ndarray | tuple,
+    normals_img: np.ndarray | None = None, # same layout as verts if provided
+    *,
+    # axial noise model: sigma_z = (alpha*d + beta*d^2) * (1 + lambda*(1-cos(theta)))
+    alpha: float = 2e-4,
+    beta:  float = 2e-4,
+    grazing_lambda: float = 1.0,
+    sigma_floor: float = 1e-4,            # meters; avoid huge weights
+    # optional low-frequency radial bias (kept out of sigma)
+    bias_k1: float = 0.0,                 # 0 disables; try 0.01–0.02 for mild bow
+    fov_deg: float = 70.0,
+    seed: int | None = None,
+):
+    """
+    Returns:
+      verts_noised : same shape as verts_img, with inf/NaN preserved at original pixels
+      weights      : (H,W) if input is (H,W,3), else (N,), precision along ray; 0 for invalid
+    """
+    rng = np.random.default_rng(seed)
+
+    V = np.asarray(verts_img)
+    orig_dtype = V.dtype
+    is_image = (V.ndim == 3)
+
+    # Flatten to (N,3) view; we'll write back into a copy
+    V_flat = V.reshape(-1, 3).astype(np.float64, copy=False)
+
+    # A vertex is valid iff all 3 components are finite
+    valid = np.isfinite(V_flat).all(axis=1)
+    if not np.any(valid):
+        # Nothing to do
+        weights = np.zeros(V.shape[:2] if is_image else (V_flat.shape[0],), dtype=np.float32)
+        return V.copy(), weights
+
+    Vv = V_flat[valid]
+
+    # Normals: optional, aligned to verts; select the same valid subset
+    if normals_img is not None:
+        N_in = np.asarray(normals_img).reshape(-1, 3)
+        Nv = N_in[valid].astype(np.float64, copy=False)
+    else:
+        Nv = None
+
+    # Camera vectors
+    C = np.asarray(cam_centre, dtype=np.float64).reshape(1, 3)
+    L = np.asarray(look_dir,   dtype=np.float64).reshape(3)
+    L /= (np.linalg.norm(L) + 1e-12)
+
+    # Geometry for valid points
+    R  = Vv - C                             # camera -> point
+    d  = R @ L                              # depth along camera forward
+    d  = np.maximum(d, 0.0)
+    Rn = np.linalg.norm(R, axis=1, keepdims=True)
+    ray_dir = R / np.maximum(Rn, 1e-12)     # per-pixel viewing ray (unit)
+
+    # Grazing term
+    if Nv is not None:
+        Nv = Nv / (np.linalg.norm(Nv, axis=1, keepdims=True) + 1e-12)
+        cos_th = np.abs(np.sum(Nv * (-ray_dir), axis=1))
+    else:
+        cos_th = np.abs(ray_dir @ (-L))
+    grazing_boost = 1.0 + grazing_lambda * (1.0 - cos_th)
+
+    # Axial std dev (meters)
+    sigma_z = (alpha * d + beta * (d ** 2)) * grazing_boost
+    sigma_z = np.maximum(sigma_z, sigma_floor)
+
+    # Sample zero-mean axial noise
+    n_ax = rng.normal(0.0, sigma_z)
+    disp = n_ax[:, None] * ray_dir
+
+    # Optional simple radial bias (kept out of sigma/weights)
+    if bias_k1 != 0.0:
+        # Build (right, up) camera basis
+        up_guess = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+        if abs(np.dot(up_guess, L)) > 0.95:
+            up_guess = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        right = np.cross(L, up_guess); right /= (np.linalg.norm(right) + 1e-12)
+        up    = np.cross(right, L)
+
+        denom = d + 1e-12
+        x = (R @ right) / denom
+        y = (R @ up)    / denom
+        scale = np.tan(np.deg2rad(fov_deg) * 0.5)
+        xn, yn = x / scale, y / scale
+        r2 = xn * xn + yn * yn
+
+        disp += (bias_k1 * d * r2)[:, None] * ray_dir
+
+    # Write back into a copy, preserving invalid pixels as-is (inf/NaN)
+    V_out = V_flat.copy()
+    V_out[valid] = (Vv + disp).astype(orig_dtype, copy=False)
+    V_out = V_out.reshape(V.shape)
+
+    # Per-vertex precision from axial jitter only; 0 for invalid
+    w = np.zeros(V_flat.shape[0], dtype=np.float32)
+    w[valid] = (1.0 / (sigma_z ** 2)).astype(np.float32)
+
+    weights = w.reshape(V.shape[:2] if is_image else (-1,))
+    return V_out, weights
+
+
 def virtual_mesh_scan(
     meshlist:               list[o3d.geometry.TriangleMesh],
     cam_centre:             tuple,
