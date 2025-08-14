@@ -811,7 +811,7 @@ def capture_spherical_scans(
     height_px:              int = 120,
     fov:                    float = 70.0,
     k:                      float = 3.5,
-    max_normal_angle_deg:   float|None=None,
+    max_normal_angle_deg:   float | None = None,
     sampler:                str = "fibonacci",  # or "latlong"
 ) -> List[Dict[str, object]]:
     """
@@ -829,7 +829,7 @@ def capture_spherical_scans(
     elif sampler == "latlong":
         cam_centres = []
         for i in range(num_views):
-            lat = 60  # fix or change to your needs
+            lat = 90
             lon = (360/num_views) * i
             cam_centres.append(polar2cartesian(r=radius, lat=lat, long=lon))
     else:

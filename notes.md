@@ -11,13 +11,22 @@
 
 - [ ] ~~Fix hole-filling normals bug~~
 
+### Bugs to fix
+
+- [x] Bayesian update not implemented?
+- [ ] Scans have ugly holes in the meshes (when using capture_spherical_scans())
+- [ ] Multilateral filter not really working...
+- [x] Weights are mismatched during mesh fusion
+
+### More to do
+
 - [x] Implement Bayesian weight update
 - [x] Refactor multilateral normal-shift filter for Bayesian weights
 - [x] Refactor point merging for Bayesian weights
 - [x] Refactor the depth image creator to allow for multiple mesh input
-- [ ] Inject some noise into depth scan creation (either uniform Gaussian or Perlin or simulated MoGE-style noise)
-- [ ] Estimate Bayesian weights during depth scan creation based on that noise
-- [ ] Set up a simple noisy flat surface test to check convergence
+- [x] Inject some noise into depth scan creation (either uniform Gaussian or Perlin or simulated MoGE-style noise)
+- [x] Estimate Bayesian weights during depth scan creation based on that noise
+- [x] Set up a simple noisy flat surface test to check convergence
 - [ ] Test, fix bugs and experiment with parameters
 - [ ] Start writing report
 
@@ -45,6 +54,7 @@
 - [ ] Find a method to compare it to??
 - [ ] Add icp for extra robustness
 
+- [ ] Try without smoothing normals before multilat shifting?
 - [ ] Use the normals predicted by MoGE
 - [ ] Normalise the normals so we don't have to within the Bayesian update
 - [ ] Can my confidence in current data decrease?
