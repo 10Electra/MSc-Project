@@ -103,11 +103,11 @@ def virtual_scan(
 
     scene = o3d.t.geometry.RaycastingScene()
 
-    geom_id_list = []
+    gt_geom_id_list = []
     for mesh in meshlist:
         id = scene.add_triangles(o3d.t.geometry.TriangleMesh.from_legacy(mesh))
-        geom_id_list.append(id)
-    geom_ids = np.asarray(geom_id_list)
+        gt_geom_id_list.append(id)
+    gt_geom_ids = np.asarray(gt_geom_id_list)
 
     rays = o3d.t.geometry.RaycastingScene.create_rays_pinhole(
         fov_deg=fov,
@@ -774,7 +774,7 @@ def virtual_mesh_scan(
         seed            = seed,
     )
 
-    mesh = mesh_depth_image(
+    object_meshes, object_weights = mesh_depth_image(
         points=verts_noised,
         weights=weights,
         vertex_colours=scan_result['vcols'],
@@ -786,7 +786,7 @@ def virtual_mesh_scan(
         max_normal_angle_deg=max_normal_angle_deg,
     )
     
-    return mesh, weights
+    return object_meshes, object_weights
 
 
 def fibonacci_sphere_points(n: int, radius: float) -> List[Vec3]:

@@ -32,7 +32,9 @@ def fuse_meshes(
     nrm_shift_iters: int = 2,
     nrm_smth_iters: int = 1,
     sigma_theta: float = 0.2,
+    max_weight: float = 1e12,
     normal_diff_thresh: float = 45.0,
+    tau_max: float|None = None,
     shift_all: bool = False,
     fill_holes: bool = True,
 ) -> o3d.geometry.TriangleMesh:
@@ -125,9 +127,9 @@ def fuse_meshes(
         overlap_mask,
         scan_ids,
         nbr_cache,
-        normal_diff_thresh=45.0,
+        normal_diff_thresh=normal_diff_thresh,
         huber_delta=1.345,
-        tau_max=None,
+        tau_max=tau_max,
     )
 
     # ---------------------------------------------------------------------
@@ -151,6 +153,7 @@ def fuse_meshes(
         overlap_idx=overlap_idx,
         global_avg_spacing=global_avg_spacing,
         h_alpha=h_alpha,
+        tau_max=tau_max,
         tree=kd_tree,
     )
     

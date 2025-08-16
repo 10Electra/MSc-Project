@@ -492,6 +492,7 @@ def merge_nearby_clusters(
     global_avg_spacing:     float,
     h_alpha:                float,
     tree,
+    tau_max:                float|None = None,
     normal_diff_thresh:     float = 45.0  # degrees; front-facing gate
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -609,6 +610,9 @@ def merge_nearby_clusters(
     clustered_overlap_cols = np.vstack(out_cols)    if out_cols else np.zeros((0,C), dtype=colours.dtype)
     clustered_overlap_nrms = np.vstack(out_nrms)    if out_nrms else np.zeros((0,3), dtype=normals.dtype)
     clustered_overlap_wts  = np.asarray(out_wts, dtype=weights.dtype)
+    
+    if tau_max is not None:
+        clustered_overlap_wts = np.clip(clustered_overlap_wts, None, tau_max)
 
     return (
         cluster_mapping,
