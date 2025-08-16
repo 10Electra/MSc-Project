@@ -14,8 +14,8 @@
 ### Bugs to fix
 
 - [x] Bayesian update not implemented?
-- [ ] Scans have ugly holes in the meshes (when using capture_spherical_scans())
-- [ ] Multilateral filter not really working...
+- [x] Scans have ugly holes in the meshes (when using capture_spherical_scans())
+- [x] Multilateral filter not really working...
 - [x] Weights are mismatched during mesh fusion
 
 ### More to do

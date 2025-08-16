@@ -782,11 +782,11 @@ def virtual_mesh_scan(
         cam_centre=cam_centre_np,
         segmentation=scan_result['segmt'],
         normals=scan_result['norms'],
-        k=3.5,
+        k=k,
         max_normal_angle_deg=max_normal_angle_deg,
     )
     
-    return mesh
+    return mesh, weights
 
 
 def fibonacci_sphere_points(n: int, radius: float) -> List[Vec3]:

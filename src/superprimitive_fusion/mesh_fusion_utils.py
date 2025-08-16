@@ -305,6 +305,10 @@ def normal_shift_smooth(
     Returns: updated (N,3) points array.
     """
 
+    points  = np.asarray(points,  dtype=np.float64)
+    normals = np.asarray(normals, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+
     new_pts = points.copy()
     shift_idx = overlap_idx if not shift_all else range(len(points))
 
@@ -883,3 +887,17 @@ def update_weights(
         weights_out = np.clip(weights_out, None, tau_max)
         
     return weights_out
+
+def compact_by_faces(V, F, attrs):
+    """
+    V: (N,3), F: (M,3), attrs: list of (N,...) arrays (e.g. colors, normals, weights)
+    Returns Vc, Fc, attrs_c (all compacted), used_mask, remap
+    """
+    used = np.zeros(len(V), dtype=bool)
+    used[np.unique(F)] = True
+    remap = -np.ones(len(V), dtype=int)
+    remap[used] = np.arange(used.sum())
+    Vc = V[used]
+    Fc = remap[F]
+    attrs_c = [a[used] if a is not None else None for a in attrs]
+    return Vc, Fc, attrs_c, used, remap

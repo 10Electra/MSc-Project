@@ -14,6 +14,7 @@ from superprimitive_fusion.mesh_fusion_utils import (
     find_boundary_edges,
     topological_trim,
     merge_nearby_clusters,
+    compact_by_faces,
     sanitise_mesh,
     colour_transfer,
 )
@@ -30,6 +31,8 @@ def fuse_meshes(
     r_alpha: float = 2.0,
     nrm_shift_iters: int = 2,
     nrm_smth_iters: int = 1,
+    sigma_theta: float = 0.2,
+    normal_diff_thresh: float = 45.0,
     shift_all: bool = False,
     fill_holes: bool = True,
 ) -> o3d.geometry.TriangleMesh:
@@ -132,7 +135,7 @@ def fuse_meshes(
     # ---------------------------------------------------------------------
     normal_shifted_points = points.copy()
     for _ in range(nrm_shift_iters):
-        normal_shifted_points = normal_shift_smooth(normal_shifted_points, normals, weights, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, shift_all)
+        normal_shifted_points = normal_shift_smooth(normal_shifted_points, normals, weights, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, sigma_theta, normal_diff_thresh, shift_all)
     
     kd_tree = o3d.geometry.KDTreeFlann(normal_shifted_points.T)
 
@@ -293,25 +296,32 @@ def fuse_meshes(
         [trimmed_overlap_tris, mapping[nonoverlap_tris]], axis=0
     )
 
-    fused_mesh = o3d.geometry.TriangleMesh(
-        vertices=o3d.utility.Vector3dVector(new_points),
-        triangles=o3d.utility.Vector3iVector(fused_mesh_triangles),
+    V0, F0, (C0, N0, W0), used_mask, remap = compact_by_faces(
+        new_points, fused_mesh_triangles, [new_colours, new_normals, new_weights]
     )
 
-    fused_mesh.vertex_colors = o3d.utility.Vector3dVector(new_colours)
+    fused_mesh = o3d.geometry.TriangleMesh(
+        vertices=o3d.utility.Vector3dVector(V0),
+        triangles=o3d.utility.Vector3iVector(F0),
+    )
+
+    fused_mesh.vertex_colors = o3d.utility.Vector3dVector(np.clip(C0, 0, 1))
 
     # ---------------------------------------------------------------------
     # Clean up fused mesh
     # ---------------------------------------------------------------------
-    fused_mesh.remove_unreferenced_vertices()
+    # fused_mesh.remove_unreferenced_vertices()
+    # fused_mesh.remove_duplicated_vertices()
     fused_mesh.remove_duplicated_triangles()
-    fused_mesh.remove_duplicated_vertices()
     fused_mesh.remove_degenerate_triangles()
     fused_mesh.remove_non_manifold_edges()
 
     if not fill_holes:
         fused_mesh.compute_vertex_normals()
-        return fused_mesh, new_weights
+        return fused_mesh, W0
+    
+    print('Hole-filling is not working at the moment.')
+    raise NotImplementedError
 
     V0, F0 = sanitise_mesh(new_points, fused_mesh_triangles)
     C0 = new_colours
@@ -331,7 +341,7 @@ def fuse_meshes(
     repaired.vertex_colors = o3d.utility.Vector3dVector(C1)
     repaired.compute_vertex_normals()
     
-    return repaired, new_weights
+    return repaired, W0
 
 
 if __name__ == "__main__":
