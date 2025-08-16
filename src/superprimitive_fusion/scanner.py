@@ -103,11 +103,10 @@ def virtual_scan(
 
     scene = o3d.t.geometry.RaycastingScene()
 
-    gt_geom_id_list = []
+    o3d_geom_id_list = []
     for mesh in meshlist:
         id = scene.add_triangles(o3d.t.geometry.TriangleMesh.from_legacy(mesh))
-        gt_geom_id_list.append(id)
-    gt_geom_ids = np.asarray(gt_geom_id_list)
+        o3d_geom_id_list.append(id)
 
     rays = o3d.t.geometry.RaycastingScene.create_rays_pinhole(
         fov_deg=fov,
@@ -122,34 +121,47 @@ def virtual_scan(
     t_hit = ans["t_hit"].numpy()
 
     # Intersection metadata (gometry id + triangle id + barycentric uv + normals)
-    geom_ids = ans["geometry_ids"].numpy().astype(np.int16)
-    geom_ids[geom_ids > 1e2] = -1
+    geom_ids_img = ans["geometry_ids"].numpy().astype(np.int16)
     prim_ids = ans["primitive_ids"].numpy().astype(np.int32)
     bary_uv = ans.get("primitive_uvs", None).numpy()
     normals = ans["primitive_normals"].numpy()
-        
+
+    # IDs in the same order as 'meshlist'
+    o3d_geom_ids = np.asarray(o3d_geom_id_list, dtype=np.uint32)   # [id_A, id_B, id_C, ...]
+
+    # Lookup: geometry_id -> meshlist index
+    id_to_idx = np.full(int(o3d_geom_ids.max()) + 1, -1, dtype=np.int32)
+    id_to_idx[o3d_geom_ids] = np.arange(o3d_geom_ids.size, dtype=np.int32)
+
+    # Remap the (H, W) image of geometry_ids to [0..len(meshlist)-1], with -1 for misses
+    invalid = o3d.t.geometry.RaycastingScene.INVALID_ID
+    hit_mask = geom_ids_img != invalid
+
+    mesh_idx_img = np.full(geom_ids_img.shape, -1, dtype=np.int32)
+    mesh_idx_img[hit_mask] = id_to_idx[geom_ids_img[hit_mask]]
+    
     rays_np = rays.numpy()  # (H*W,6)
     origins = rays_np[..., :3]
     dirs = rays_np[..., 3:]
     verts = origins + dirs * t_hit[..., None]
     
-    vcols = np.full((*t_hit.shape, 3), 0.5)
 
     # Assertions for bugfixing
     assert bary_uv is not None
     for mesh in meshlist:
         assert mesh.has_vertex_colors()
 
+    vcols = np.full((*t_hit.shape, 3), 0.5)
     for id in range(len(meshlist)):
-        rel_prim_ids = prim_ids[geom_ids==id]
-        rel_bary_uv  =  bary_uv[geom_ids==id]
-        vcols[geom_ids==id] = _interpolate_vertex_colors(meshlist[id], rel_prim_ids, rel_bary_uv)
+        rel_prim_ids = prim_ids[mesh_idx_img==id]
+        rel_bary_uv  =  bary_uv[mesh_idx_img==id]
+        vcols[mesh_idx_img==id] = _interpolate_vertex_colors(meshlist[id], rel_prim_ids, rel_bary_uv)
     
     scan = dict()
     scan['verts'] = verts
     scan['vcols'] = vcols
     scan['norms'] = normals
-    scan['segmt'] = geom_ids
+    scan['segmt'] = mesh_idx_img
     
     return scan
 
