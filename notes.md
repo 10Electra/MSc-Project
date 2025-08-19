@@ -4,13 +4,18 @@
 1. Get vanilla 360* multi-object renders
 2. [Finish presentation]
 3. [Prepare for interview]
-4. Learn about what makes a good report - what are they looking for?
+4. Learn about what makes a good report - what are they looking for? (watch Imperial lecture)
 5. Write a detailed skeleton for the report - see how long I'll have for evaluation
 6. Get some results
    1. Uncertainty justification
    2. Complexity (number of scans, scan resolution)
    3. MoGe and SAM / real data
 7. Write about the results (possibly after each experiment)
+
+## Ideas for future works
+
+- Diffusion for point-shifting
+- Graph link prediction for remeshing
 
 ## To do
 
