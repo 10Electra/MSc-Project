@@ -1,16 +1,24 @@
 # Notes on the Project
 ## Three-week plan
 
-1. Get vanilla 360* multi-object renders
-2. [Finish presentation]
-3. [Prepare for interview]
-4. Learn about what makes a good report - what are they looking for? (watch Imperial lecture)
-5. Write a detailed skeleton for the report - see how long I'll have for evaluation
-6. Get some results
-   1. Uncertainty justification
-   2. Complexity (number of scans, scan resolution)
-   3. MoGe and SAM / real data
-7. Write about the results (possibly after each experiment)
+- [x] Get vanilla 360* multi-object renders
+- [x] [Finish presentation]
+- [x] [Prepare for interview]
+- [ ] Learn about what makes a good report - what are they looking for? (watch Imperial lecture)
+- [ ] Write a detailed skeleton for the report - see how long I'll have for evaluation
+- [ ] Fix code bugs
+  - [ ] Fused SP normal direction
+  - [ ] Vertex density and meshing ball radius
+  - [ ] Implement Bayesian-friendly mean-shift clustering?
+  - [ ] Implement pre-merge curvature-based decimation?
+- [ ] Get some results
+  - [ ] Qualitative results on simulated data
+  - [ ] Evaluation of uncertainty (justifying it)
+  - [ ] Comparison with TSDF fusion (justifying point-shifting)
+  - [ ] Complexity curves (number of scans, scan resolution)
+  - [ ] Robustness against noise and differing scales
+  - [ ] Tests on real data
+- [ ] Write about the results (possibly after each experiment)
 
 ## Ideas for future works
 
@@ -44,7 +52,7 @@
 - [x] Inject some noise into depth scan creation (either uniform Gaussian or Perlin or simulated MoGE-style noise)
 - [x] Estimate Bayesian weights during depth scan creation based on that noise
 - [x] Set up a simple noisy flat surface test to check convergence
-- [ ] Test, fix bugs and experiment with parameters
+- [x] Test, fix bugs and experiment with parameters
 - [ ] Start writing report
 
 - [ ] Use MoGE and SuperPrimitive to test things
@@ -55,14 +63,14 @@
 - [x] Make camera paths
 - [ ] Test superprimitive fusion at different resolution scales
 - [ ] Improve discontinuity machine
-- [ ] Make SuperPrimitive segmentation work robustly for multi-object images
+- [ ] Make SuperPrimitive paper segmentation work robustly for multi-object images
   - [ ] Understand settings more
   - [ ] Add some CV techniques for robustness
-- [ ] Make edge length filtering work with multi-object images to make them processable
-- [ ] Refactor the RGBD scanner and mesher
-  - [ ] It should accept a list of meshes
-  - [ ] It should output a list of meshes?
-- [ ] Fuse scene
+- [x] Make edge length filtering work with multi-object images to make them processable
+- [x] Refactor the RGBD scanner and mesher
+  - [x] It should accept a list of meshes
+  - [x] It should output a list of meshes?
+- [x] Fuse scene
 - [ ] Demonstrate fusion of noisy and badly registered superprimitives
 - [ ] Evaluate the method
   - [ ] Compare meshes with ground truth
