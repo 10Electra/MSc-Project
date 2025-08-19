@@ -40,15 +40,26 @@ Thinking about how to present the story of my project and its outcomes in both w
 
 1. Introduction
    1. Motivation
-   2. Research aims and objectives
+      - Importance of mapping
+      - Importance of mesh
+      - SuperPrimitive VO
+      - Merging mesh: SuperPrimitive VO ---> SLAM
+   <!-- 2. Problem Specification
+      - Requirements for the solution (mesh+mesh->mesh; retained colours, etc.) -->
    3. Contributions
+      - Implemented such a system based on a paper
+      - Developed/improved the point-shifting step
+      - Built a Bayesian uncertainty framework around it
    4. Report structure overview
 2. Background and related work
    1. Application context (more detail / reminder on SuperPrimitive and its shortcomings)
-   2. Problem statement, review of existing solutions through the lens of the application
-   3. Trilateral shift paper (check whether they've implemented weights)
-   4. Modifications of trilateral shift paper for MoGe; proposed solutions
-3. Approach design
+   2. Problem specification
+   3. Review of existing solutions through the lens of the application
+   4. Trilateral shift paper (check whether they've implemented weights)
+   5. Modifications of trilateral shift paper for MoGe; proposed solutions
+3. Implementation
+   1. Early testing in 2D/3D?
+   2. [Step through the final pipeline, explaining algorithms]
 4. Results and evaluation
    1. Qualitative results on simulated data
    2. Evaluation of uncertainty awareness
