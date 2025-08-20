@@ -6,10 +6,10 @@
 - [x] [Prepare for interview]
 - [x] Learn about what makes a good report - what are they looking for? (watch Imperial lecture)
 - [x] Write a detailed skeleton for the report - see how long I'll have for evaluation
-- [ ] Fix code bugs
-  - [ ] Fused SP normal direction
-  - [ ] Vertex density and meshing ball radius
-  - [ ] Missing mesh because of occlusion (designated slots)
+- [x] Fix code bugs
+  - [x] Fused SP normal direction
+  - [x] Vertex density and meshing ball radius
+  - [x] Missing mesh because of occlusion (designated slots)
   - [ ] Implement Bayesian-friendly mean-shift clustering?
   - [ ] Implement pre-merge curvature-based decimation?
 - [ ] Get some results
