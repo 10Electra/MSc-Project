@@ -32,11 +32,12 @@ def fuse_meshes(
     nrm_shift_iters: int = 2,
     nrm_smth_iters: int = 1,
     sigma_theta: float = 0.2,
-    max_weight: float = 1e12,
     normal_diff_thresh: float = 45.0,
     tau_max: float|None = None,
     shift_all: bool = False,
-    fill_holes: bool = True,
+    fill_holes: bool = False,
+    ball_radius_percentiles: list = [10, 50, 90],
+    bilateral_weight_update: bool = False,
 ) -> o3d.geometry.TriangleMesh:
     """Fuses two registered open3d triangle meshes.
 
@@ -130,6 +131,7 @@ def fuse_meshes(
         normal_diff_thresh=normal_diff_thresh,
         huber_delta=1.345,
         tau_max=tau_max,
+        bilateral=bilateral_weight_update,
     )
 
     # ---------------------------------------------------------------------
@@ -229,18 +231,14 @@ def fuse_meshes(
     # ---------------------------------------------------------------------
     # Mesh the overlap zone
     # ---------------------------------------------------------------------
-    def density_aware_radii(pcd: o3d.geometry.PointCloud, k=10):
+    def density_aware_radii(pcd: o3d.geometry.PointCloud, percentiles=[10,50,90], k=10):
         pts = np.asarray(pcd.points)
         kdt = o3d.geometry.KDTreeFlann(pcd)
         dk = np.empty(len(pts))
         for i, p in enumerate(pts):
             _, _, d2 = kdt.search_knn_vector_3d(p, k+1)  # includes the point itself
             dk[i] = np.sqrt(d2[-1])                      # k-th neighbor distance
-        h10, h50, h90 = np.percentile(dk, [10, 50, 90])
-        r_min = 0.8 * h10
-        r_mid = h50
-        r_max = 1.2 * h90
-        return [r_min, r_mid, r_max]
+        return np.percentile(dk, percentiles)
 
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(new_points[:n_overlap])
@@ -255,7 +253,7 @@ def fuse_meshes(
         )
         pcd.orient_normals_consistent_tangent_plane(k=30)
 
-    radii = o3d.utility.DoubleVector(density_aware_radii(pcd, k=10))
+    radii = o3d.utility.DoubleVector(density_aware_radii(pcd, ball_radius_percentiles, k=10))
     pcd.estimate_normals(o3d.geometry.KDTreeSearchParamKNN(40))
     pcd.orient_normals_consistent_tangent_plane(50)
     

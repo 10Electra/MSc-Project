@@ -4,11 +4,12 @@
 - [x] Get vanilla 360* multi-object renders
 - [x] [Finish presentation]
 - [x] [Prepare for interview]
-- [ ] Learn about what makes a good report - what are they looking for? (watch Imperial lecture)
-- [ ] Write a detailed skeleton for the report - see how long I'll have for evaluation
+- [x] Learn about what makes a good report - what are they looking for? (watch Imperial lecture)
+- [x] Write a detailed skeleton for the report - see how long I'll have for evaluation
 - [ ] Fix code bugs
   - [ ] Fused SP normal direction
   - [ ] Vertex density and meshing ball radius
+  - [ ] Missing mesh because of occlusion (designated slots)
   - [ ] Implement Bayesian-friendly mean-shift clustering?
   - [ ] Implement pre-merge curvature-based decimation?
 - [ ] Get some results

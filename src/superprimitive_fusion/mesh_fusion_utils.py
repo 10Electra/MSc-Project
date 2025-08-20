@@ -295,7 +295,6 @@ def normal_shift_smooth(
     sigma_theta:    float = 0.2,                # Normal angle difference std (related to sharpness)
     normal_diff_thresh: float = 45.0,           # degrees; hard front-facing gate
     shift_all:      bool = False,               # All pts or just overlap
-    rho_floor:      float = 1e-6,               # floor for density std; disables w_density if tiny
 ) -> np.ndarray:
     """
     One pass of along-normal shifting. Assumes:
@@ -356,16 +355,9 @@ def normal_shift_smooth(
         w_normal = np.exp(-(1.0 - cos_theta) / (2.0 * sigma_c))
         
         
-        # Using MAD as the std for local density
         d_rho = local_density[i] - local_density[nbr][mask_face]
-        med         = np.median(d_rho)
-        mad         = np.median(np.abs(d_rho - med)) # Median absolute deviation
-        sigma_rho = 1.4826 * mad # =~ std if Gaussian
-        if sigma_rho < rho_floor:
-            w_density = 1.0
-            print('[WARN; vertex smoother] Using w_density=1.0 as sigma_rho < rho_floor.')
-        else:
-            w_density = np.exp(-(d_rho * d_rho) / (2.0 * sigma_rho * sigma_rho))
+        sigma_rho   = np.max(np.abs(d_rho)) + 1e-12
+        w_density = np.exp(-(d_rho * d_rho) / (2.0 * sigma_rho * sigma_rho))
 
         w = weights_nbr * w_spatial * w_density * w_normal
 
@@ -577,10 +569,18 @@ def merge_nearby_clusters(
                 idxs = nbr_global[m2]
                 if idxs.size == 0:
                     idxs = np.array([seed], dtype=int)
+                else:
+                    # Seed + neighbours
+                    idxs = np.unique(np.concatenate(([seed], idxs)))
 
         # Bayesian merge on idxs
         tau = weights[idxs]     # (K,)
         T   = float(tau.sum())  # scalar precision
+        if T <= 0:
+            # Fall back plan
+            idxs = np.array([seed], dtype=int)
+            tau = weights[idxs]
+            T = float(tau.sum()) if tau.sum() > 0 else 1.0
 
         # Positions & colours: precision-weighted means
         x_merge = (tau[:, None] * normal_shifted_points[idxs]).sum(axis=0) / T
@@ -817,7 +817,7 @@ def show_mesh_boundaries(mesh: o3d.geometry.TriangleMesh, show: bool = True, edg
 
 
 def update_weights(
-        points: np.ndarray,
+        points:             np.ndarray,
         normals:            np.ndarray,
         weights:            np.ndarray,
         overlap_mask:       np.ndarray,
@@ -826,66 +826,66 @@ def update_weights(
         normal_diff_thresh: float       =45.0,
         huber_delta:        float|None  =1.345,
         tau_max:            float|None  =None,
+        bilateral:          bool        =False,
     ) -> np.ndarray:
 
     weights_out = weights.copy()
 
-    fresh_scan_id = scan_ids.max()
-    fresh_scan_mask = scan_ids == fresh_scan_id
-    overlap_measurement_mask = fresh_scan_mask & overlap_mask
+    unique_scan_ids = np.unique(scan_ids)
+    
+    scan_ids_to_update = unique_scan_ids if bilateral else [unique_scan_ids.max()]
 
-    for i in np.flatnonzero(overlap_measurement_mask):
-        z   = points[i]
-        n_z = normals[i]
-        
-        nbrs = nbr_cache[i]
-        ixs  = nbrs[~fresh_scan_mask[nbrs]] # ids of non-measurement neighbours
-        
-        # Non-measurement neighbours and their normals
-        xs   = points[ixs]
-        n_xs = normals[ixs]
-        
-        # Normalise both sets of normals
-        n_z = n_z / (np.linalg.norm(n_z) + 1e-12)
-        n_xs = n_xs / (np.linalg.norm(n_xs, axis=1, keepdims=True) + 1e-12)
+    for id in scan_ids_to_update:
+        this_scan_mask = scan_ids == id
+        overlap_measurement_mask = this_scan_mask & overlap_mask
+        for i in np.flatnonzero(overlap_measurement_mask):
+            z   = points[i]
+            n_z = normals[i]
+            
+            nbrs = nbr_cache[i]
+            ixs  = nbrs[~this_scan_mask[nbrs]] # ids of non-measurement neighbours
+            
+            # Non-measurement neighbours and their normals
+            xs   = points[ixs]
+            n_xs = normals[ixs]
 
-        # Calculate z<->x compatibility based on angle between normals
-        cos_th = np.cos(np.deg2rad(normal_diff_thresh))
-        dots   = (n_xs @ n_z)
-        mask = dots >= cos_th
-        
-        if not np.any(mask):
-            continue # Skip this measurement if there are no compatible current values
-        
-        ixs  = ixs[mask]
-        n_xs = n_xs[mask]
-        xs   = xs[mask]
-        
-        # Calculate point-to-plane residuals (z to x's plane)
-        rs = np.einsum('ij,ij->i', n_xs, xs - z)
-        
-        # Pull out precision (== weight == inverse covariance) for the points
-        tau_z   = weights[i]
-        sigma_z = 1.0 / np.sqrt(max(1e-12, tau_z))
+            # Calculate z<->x compatibility based on angle between normals
+            cos_th = np.cos(np.deg2rad(normal_diff_thresh))
+            dots   = (n_xs @ n_z)
+            mask = dots >= cos_th
+            
+            if not np.any(mask):
+                continue # Skip this measurement if there are no compatible current values
+            
+            ixs  = ixs[mask]
+            n_xs = n_xs[mask]
+            xs   = xs[mask]
+            
+            # Calculate point-to-plane residuals (z to x's plane)
+            rs = np.einsum('ij,ij->i', n_xs, xs - z)
+            
+            # Pull out precision (== weight == inverse covariance) for the points
+            tau_z   = weights[i]
+            sigma_z = 1.0 / np.sqrt(max(1e-12, tau_z))
 
-        # Huber loss robustness measure to decrease the effect of outliers
-        t = np.abs(rs) / sigma_z
-        keep = t <= 3.0 # Ignore massively outlying associations
-        if not np.any(keep):
-            continue
-        
-        w = np.ones_like(t)
-        if huber_delta is not None:
-            far = t > huber_delta
-            w[far] = huber_delta / t[far]
-        
-        # Calculate likelihoods and responsibilities
-        ls = np.exp(-0.5 * (t**2)) * w
-        resp = ls / (ls.sum() + 1e-12)
-        
-        # Update weights of non-new points x based on Bayesian update using new points z
-        w_xs = weights_out[ixs]
-        weights_out[ixs] = w_xs + resp * tau_z
+            # Huber loss robustness measure to decrease the effect of outliers
+            t = np.abs(rs) / sigma_z
+            keep = t <= 3.0 # Ignore massively outlying associations
+            if not np.any(keep):
+                continue
+            
+            w = np.ones_like(t)
+            if huber_delta is not None:
+                far = t > huber_delta
+                w[far] = huber_delta / t[far]
+            
+            # Calculate likelihoods and responsibilities
+            ls = np.exp(-0.5 * (t**2)) * w
+            resp = ls / (ls.sum() + 1e-12)
+            
+            # Update weights of non-new points x based on Bayesian update using new points z
+            w_xs = weights_out[ixs]
+            weights_out[ixs] = w_xs + resp * tau_z
         
     if tau_max is not None:
         weights_out = np.clip(weights_out, None, tau_max)
