@@ -254,17 +254,6 @@ def fuse_meshes(
         pcd.orient_normals_consistent_tangent_plane(k=30)
 
     radii = o3d.utility.DoubleVector(density_aware_radii(pcd, ball_radius_percentiles, k=10))
-    pcd.estimate_normals(o3d.geometry.KDTreeSearchParamKNN(40))
-    pcd.orient_normals_consistent_tangent_plane(50)
-    
-    # points_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
-    # dists = points_pcd.compute_nearest_neighbor_distance()
-    # s = np.median(dists)
-
-    # radii = o3d.utility.DoubleVector([1.2*s, 2*s, 3*s, 4*s])
-
-    # r_min = global_avg_spacing
-    # radii = o3d.utility.DoubleVector(np.geomspace(r_min, r_min*4, num=5))
 
     overlap_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
         pcd, radii
