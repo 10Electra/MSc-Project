@@ -44,9 +44,8 @@ Thinking about how to present the story of my project and its outcomes in both w
       - Importance of mesh
       - SuperPrimitive VO
       - Merging mesh: SuperPrimitive VO ---> SLAM
-   <!-- 2. Problem Specification
-      - Requirements for the solution (mesh+mesh->mesh; retained colours, etc.) -->
    3. Contributions
+      - [Aim of this project]
       - Implemented such a system based on a paper
       - Developed/improved the point-shifting step
       - Built a Bayesian uncertainty framework around it
