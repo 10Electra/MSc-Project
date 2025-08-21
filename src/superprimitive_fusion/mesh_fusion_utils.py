@@ -266,7 +266,6 @@ def smooth_overlap_set_cached(
         neighbour_idx = nbr_cache[i]
 
         if neighbour_idx.size == 0:
-            print(f'point {i} has no neighbours')
             continue
 
         ovlp_nbrs = overlap_mask[neighbour_idx]
