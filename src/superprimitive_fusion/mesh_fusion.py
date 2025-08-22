@@ -2,6 +2,7 @@ import numpy as np
 import open3d as o3d  # type: ignore
 import pymeshfix # type: ignore
 from scipy.spatial import cKDTree # type: ignore
+from typing import Optional, Tuple
 
 from superprimitive_fusion.mesh_fusion_utils import (
     smooth_normals,
@@ -24,9 +25,9 @@ from line_profiler import profile
 @profile
 def fuse_meshes(
     mesh1: o3d.geometry.TriangleMesh,
-    weights1: np.ndarray,
+    weights1: Optional[np.ndarray],
     mesh2: o3d.geometry.TriangleMesh,
-    weights2: np.ndarray,
+    weights2: Optional[np.ndarray],
     h_alpha: float = 2.5,
     r_alpha: float = 2.0,
     nrm_shift_iters: int = 2,
@@ -35,10 +36,9 @@ def fuse_meshes(
     normal_diff_thresh: float = 45.0,
     tau_max: float|None = None,
     shift_all: bool = False,
-    fill_holes: bool = False,
     ball_radius_percentiles: list = [10, 50, 90],
     bilateral_weight_update: bool = False,
-) -> o3d.geometry.TriangleMesh:
+) -> Tuple[o3d.geometry.TriangleMesh, Optional[np.ndarray]]:
     """Fuses two registered open3d triangle meshes.
 
     Args:
@@ -61,12 +61,21 @@ def fuse_meshes(
     pointclouds = (points1, points2)
     points = np.vstack(pointclouds)
     
-    assert weights1.ndim == 1 and len(weights1) == len(mesh1.vertices)
-    assert weights2.ndim == 1 and len(weights2) == len(mesh2.vertices)
-    weights = np.concatenate((weights1, weights2))
+    two_none = (weights1 is None and weights2 is None)
+    if (weights1 is None) ^ (weights2 is None):
+        raise ValueError("weights1 and weights2 must both be None or both be arrays.")
 
-    colours1 = mesh1.vertex_colors
-    colours2 = mesh2.vertex_colors
+    if two_none:
+        weights = None
+    else:
+        assert weights1 is not None and weights2 is not None
+        assert weights1.ndim == 1 and len(weights1) == len(mesh1.vertices)
+        assert weights2.ndim == 1 and len(weights2) == len(mesh2.vertices)
+        weights = np.concatenate((weights1, weights2))
+
+
+    colours1 = np.asarray(mesh1.vertex_colors)
+    colours2 = np.asarray(mesh2.vertex_colors)
     colours = np.concatenate([colours1, colours2], axis=0)
 
     kd_tree = o3d.geometry.KDTreeFlann(points.T)
@@ -121,25 +130,28 @@ def fuse_meshes(
     # ---------------------------------------------------------------------
     # Update weights
     # ---------------------------------------------------------------------
-    updated_weights = update_weights(
-        points,
-        normals,
-        weights,
-        overlap_mask,
-        scan_ids,
-        nbr_cache,
-        normal_diff_thresh=normal_diff_thresh,
-        huber_delta=1.345,
-        tau_max=tau_max,
-        bilateral=bilateral_weight_update,
-    )
+    if weights is None:
+        updated_weights = None
+    else:
+        updated_weights = update_weights(
+            points,
+            normals,
+            weights,
+            overlap_mask,
+            scan_ids,
+            nbr_cache,
+            normal_diff_thresh=normal_diff_thresh,
+            huber_delta=1.345,
+            tau_max=tau_max,
+            bilateral=bilateral_weight_update,
+        )
 
     # ---------------------------------------------------------------------
     # Multilateral point shifting along normals
     # ---------------------------------------------------------------------
     normal_shifted_points = points.copy()
     for _ in range(nrm_shift_iters):
-        normal_shifted_points = normal_shift_smooth(normal_shifted_points, normals, weights, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, sigma_theta, normal_diff_thresh, shift_all)
+        normal_shifted_points = normal_shift_smooth(normal_shifted_points, normals, updated_weights, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, sigma_theta, normal_diff_thresh, shift_all)
     
     kd_tree = o3d.geometry.KDTreeFlann(normal_shifted_points.T)
 
@@ -204,14 +216,18 @@ def fuse_meshes(
         ],
         axis=0,
     )
-    new_weights = np.concatenate(
-        [
-            clustered_overlap_wts,
-            weights[border_mask],
-            weights[nonoverlap_nonborder_mask],
-        ],
-        axis=0,
-    )
+    if updated_weights is None:
+        new_weights = None
+    else:
+        new_weights = np.concatenate(
+            [
+                clustered_overlap_wts,
+                updated_weights[border_mask],
+                updated_weights[nonoverlap_nonborder_mask],
+            ],
+            axis=0,
+        )
+
     
     new_colours = np.clip(new_colours, 0, 1)
     
@@ -242,16 +258,7 @@ def fuse_meshes(
 
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(new_points[:n_overlap])
-
-    if new_normals[:n_overlap] is not None:
-        pcd.normals = o3d.utility.Vector3dVector(new_normals[:n_overlap])
-    else:
-        pcd.estimate_normals(
-            search_param=o3d.geometry.KDTreeSearchParamHybrid(
-                radius=2.5 * global_avg_spacing, max_nn=30
-            )
-        )
-        pcd.orient_normals_consistent_tangent_plane(k=30)
+    pcd.normals = o3d.utility.Vector3dVector(new_normals[:n_overlap])
 
     radii = o3d.utility.DoubleVector(density_aware_radii(pcd, ball_radius_percentiles, k=10))
 
@@ -286,9 +293,15 @@ def fuse_meshes(
         [trimmed_overlap_tris, mapping[nonoverlap_tris]], axis=0
     )
 
+    _weight_attr = new_weights if new_weights is not None else np.zeros(len(new_points), dtype=np.float64)
+
     V0, F0, (C0, N0, W0), used_mask, remap = compact_by_faces(
-        new_points, fused_mesh_triangles, [new_colours, new_normals, new_weights]
+        new_points, fused_mesh_triangles, [new_colours, new_normals, _weight_attr]
     )
+
+    # Ensure weights=out is returned when both inputs were None
+    if two_none:
+        W0 = None
 
     fused_mesh = o3d.geometry.TriangleMesh(
         vertices=o3d.utility.Vector3dVector(V0),
@@ -306,38 +319,5 @@ def fuse_meshes(
     fused_mesh.remove_degenerate_triangles()
     fused_mesh.remove_non_manifold_edges()
 
-    if not fill_holes:
-        fused_mesh.compute_vertex_normals()
-        return fused_mesh, W0
-    
-    print('Hole-filling is not working at the moment.')
-    raise NotImplementedError
-
-    V0, F0 = sanitise_mesh(new_points, fused_mesh_triangles)
-    C0 = new_colours
-
-    mf = pymeshfix.PyTMesh(False)
-    mf.load_array(V0, F0)
-
-    mf.fill_small_boundaries(nbe=20)
-
-    V1, F1 = mf.return_arrays()
-
-    C1 = colour_transfer(V0, C0, V1)
-
-    repaired = o3d.geometry.TriangleMesh()
-    repaired.vertices = o3d.utility.Vector3dVector(V1)
-    repaired.triangles = o3d.utility.Vector3iVector(F1)
-    repaired.vertex_colors = o3d.utility.Vector3dVector(C1)
-    repaired.compute_vertex_normals()
-    
-    return repaired, W0
-
-
-if __name__ == "__main__":
-    mesh1 = o3d.io.read_triangle_mesh("./notebooks/meshes/bottle_1.ply")
-    mesh2 = o3d.io.read_triangle_mesh("./notebooks/meshes/bottle_2.ply")
-
-    fused_mesh = fuse_meshes(mesh1, mesh2, h_alpha=3)
-    
-    # o3d.visualization.draw_geometries([fused_mesh])
+    fused_mesh.compute_vertex_normals()
+    return fused_mesh, W0
