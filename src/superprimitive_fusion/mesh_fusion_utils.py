@@ -1,7 +1,7 @@
 import math
 import numpy as np
 import open3d as o3d # type: ignore
-from typing import Tuple, Union
+from typing import Tuple, Union, Optional
 import copy
 from collections import deque, defaultdict
 from scipy.spatial import cKDTree # type: ignore
@@ -476,69 +476,70 @@ def topological_trim(mesh: o3d.geometry.TriangleMesh,
 def merge_nearby_clusters(
     normal_shifted_points:  np.ndarray,
     normals:                np.ndarray,
-    weights:                np.ndarray,
+    weights:                Optional[np.ndarray],
     colours:                np.ndarray,
     overlap_mask:           np.ndarray,
     overlap_idx:            np.ndarray,
     global_avg_spacing:     float,
     h_alpha:                float,
     tree,
-    tau_max:                float|None = None,
+    tau_max:                Optional[float] = None,
     normal_diff_thresh:     float = 45.0  # degrees; front-facing gate
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Vertex density reduction by weighted vertex merging.
-    - Seed points are selected in order of descending precision
-    - Cluster neighbourhood/membership == cylindrical neighbourhood
-    around the seed; same-side-facing points only
-    - Merge operator: sum of precisions; precision-weighted means.
-    
-    Args:
-        points: (N, 3) array of original points.
-        normal_shifted_points: (N, 3) array of shifted points.
-        normals: (N, 3) array of normals.
-        weights: (N,) array of weights representing point confidence.
-        colours: (N, C) array of colours.
-        overlap_mask: (N,) boolean array indicating overlap points.
-        global_avg_spacing: float, global average spacing.
-        h_alpha: float, parameter for find_cyl_neighbours.
-        tree: kd-tree of (all) normal-shifted points
-        normal_diff_thresh: normal difference angle threshold for same-way-facing
+    Vertex density reduction by vertex merging.
+    - If `weights` is provided: seeds are processed in order of descending (clipped) precision,
+      and merges use precision-weighted means with per-point weights clipped by `tau_max` if given.
+    - If `weights` is None: seeds are processed in a random order, means are unweighted,
+      and merged weights have weight 1 (e.g. treated no different to other points in future).
 
     Returns:
         cluster_mapping: (N,) assigned cluster id for each input point or -1 if unclustered.
-        clustered_pnts: (K, 3)
-        clustered_cols: (K, C)
-        clustered_nrms: (K, 3)
-        clustered_wts:  (K,) precision (sum of member precisions)
+        clustered_pnts:   (K, 3)
+        clustered_cols:   (K, C)
+        clustered_nrms:   (K, 3)
+        clustered_wts:    (K,) sum of member weights; if `weights is None`, this is the cluster size.
     """
-
     N = normal_shifted_points.shape[0]
     C = colours.shape[1]
-    
-    # Output lists
-    out_pts:   list[np.ndarray] = []
-    out_cols:  list[np.ndarray] = []
-    out_nrms:  list[np.ndarray] = []
-    out_wts:   list[float]      = []
-    
-    # cluster mapping == -1 means 'not yet assigned to any merged cluster'
+
+    out_pts:  list[np.ndarray] = []
+    out_cols: list[np.ndarray] = []
+    out_nrms: list[np.ndarray] = []
+    out_wts:  list[float]      = []
+
     cluster_mapping = -np.ones(N, dtype=int)
     visited         = np.zeros(N, dtype=bool)
 
-    # Highest precision first among overlap points
-    ordered_seeds = overlap_idx[np.argsort(weights[overlap_idx])[::-1]]
+    use_weights = weights is not None
+
+    # Prepare effective weights (sanitize + per-point clipping) for *all* weighted ops
+    if use_weights:
+        w_eff = np.asarray(weights, dtype=float)
+        # sanitise: NaN->0, +inf stays +inf (capped later), -inf->0
+        w_eff = np.nan_to_num(w_eff, nan=0.0, posinf=np.finfo(float).max, neginf=0.0)
+        w_eff = np.maximum(w_eff, 0.0)
+        if tau_max is not None:
+            tau_cap = float(tau_max)
+            if tau_cap < 0:
+                tau_cap = 0.0
+            w_eff = np.minimum(w_eff, tau_cap)
+
+    # Seed order
+    if use_weights:
+        ordered_seeds = overlap_idx[np.argsort(w_eff[overlap_idx])[::-1]]
+    else:
+        ordered_seeds = np.random.permutation(overlap_idx)
 
     cos_th = np.cos(np.deg2rad(normal_diff_thresh))
 
     for seed in ordered_seeds:
         if visited[seed]:
             continue
-        
-        p0  = normal_shifted_points[seed]
-        n0  = normals[seed]
 
-        # Find cylindrical neighbours around the seed (global indices)
+        p0 = normal_shifted_points[seed]
+        n0 = normals[seed]
+
         nbr_global, d2 = find_cyl_neighbours(
             point=p0,
             normal=n0,
@@ -572,29 +573,32 @@ def merge_nearby_clusters(
                     # Seed + neighbours
                     idxs = np.unique(np.concatenate(([seed], idxs)))
 
-        # Bayesian merge on idxs
-        tau = weights[idxs]     # (K,)
-        T   = float(tau.sum())  # scalar precision
-        if T <= 0:
-            # Fall back plan
-            idxs = np.array([seed], dtype=int)
-            tau = weights[idxs]
-            T = float(tau.sum()) if tau.sum() > 0 else 1.0
+        # Merge weights
+        if use_weights:
+            tau = w_eff[idxs]
+        else:
+            tau = np.ones(idxs.size, dtype=float)
 
-        # Positions & colours: precision-weighted means
+        T = float(tau.sum())
+
+        # Fallback if degenerate
+        if not np.isfinite(T) or T <= 0.0:
+            idxs = np.array([seed], dtype=int)
+            tau = (w_eff[idxs] if use_weights else np.ones(1, dtype=float))
+            T = float(tau.sum()) if np.isfinite(tau.sum()) and tau.sum() > 0 else 1.0
+
+        # Positions & colours: weighted or unweighted means
         x_merge = (tau[:, None] * normal_shifted_points[idxs]).sum(axis=0) / T
         c_merge = (tau[:, None] * colours[idxs]).sum(axis=0) / T
 
         # Normal: principal eigenvector of sum tau * n n^T
-        n_i   = normals[idxs]   # (K,3)
-        M     = (tau[:, None, None] * (n_i[:, :, None] * n_i[:, None, :])).sum(axis=0)  # 3x3
+        n_i = normals[idxs]
+        M   = (tau[:, None, None] * (n_i[:, :, None] * n_i[:, None, :])).sum(axis=0)
         eigvals, eigvecs = np.linalg.eigh(M)
-        n_merge = eigvecs[:, np.argmax(eigvals)]
-        # Align merged normal with seed normal for consistency
+        n_merge = eigvecs[:, int(np.argmax(eigvals))]
         if float(n_merge @ n0) < 0.0:
             n_merge = -n_merge
 
-        # Record
         cid = len(out_pts)
         cluster_mapping[idxs] = cid
         visited[idxs] = True
@@ -602,24 +606,22 @@ def merge_nearby_clusters(
         out_pts.append(x_merge.astype(normal_shifted_points.dtype, copy=False))
         out_cols.append(c_merge.astype(colours.dtype, copy=False))
         out_nrms.append(n_merge.astype(normals.dtype, copy=False))
-        out_wts.append(T)
+        out_wts.append(T if use_weights else 1)
 
-    # Stack outputs
-    clustered_overlap_pnts = np.vstack(out_pts)     if out_pts else  np.zeros((0,3), dtype=normal_shifted_points.dtype)
-    clustered_overlap_cols = np.vstack(out_cols)    if out_cols else np.zeros((0,C), dtype=colours.dtype)
-    clustered_overlap_nrms = np.vstack(out_nrms)    if out_nrms else np.zeros((0,3), dtype=normals.dtype)
-    clustered_overlap_wts  = np.asarray(out_wts, dtype=weights.dtype)
-    
-    if tau_max is not None:
-        clustered_overlap_wts = np.clip(clustered_overlap_wts, None, tau_max)
+    if len(out_pts) == 0:
+        return (cluster_mapping,
+                np.empty((0, 3), dtype=normal_shifted_points.dtype),
+                np.empty((0, C), dtype=colours.dtype),
+                np.empty((0, 3), dtype=normals.dtype),
+                np.empty((0,), dtype=float))
 
-    return (
-        cluster_mapping,
-        clustered_overlap_pnts,
-        clustered_overlap_cols,
-        clustered_overlap_nrms,
-        clustered_overlap_wts,
-    )
+    clustered_pnts = np.vstack(out_pts)
+    clustered_cols = np.vstack(out_cols)
+    clustered_nrms = np.vstack(out_nrms)
+    clustered_wts  = np.asarray(out_wts, dtype=float)
+
+    return cluster_mapping, clustered_pnts, clustered_cols, clustered_nrms, clustered_wts
+
 
 def sanitise_mesh(V, F):
     # shapes
@@ -704,70 +706,6 @@ def get_mesh_components(mesh:o3d.geometry.TriangleMesh, show=True):
         )
     return components
 
-def count_inconsistent_normal_pairs(mesh: o3d.geometry.TriangleMesh,
-                                    dot_threshold: float = 0.0,
-                                    include_nonmanifold_pairs: bool = False,
-                                    show: bool = False) -> int:
-    if len(mesh.triangles) == 0:
-        if show:
-            print("Found 0 inconsistent pairs across 0 triangles")
-        return 0
-
-    if len(mesh.triangle_normals) != len(mesh.triangles):
-        mesh.compute_triangle_normals(normalized=True)
-
-    normals = np.asarray(mesh.triangle_normals, dtype=np.float64)
-    triangles = np.asarray(mesh.triangles, dtype=np.int64)
-
-    # Build list of adjacent triangle index pairs
-    edge_to_tris = defaultdict(list)
-    for t_idx, (a, b, c) in enumerate(triangles):
-        for u, v in ((a, b), (b, c), (c, a)):
-            e = (u, v) if u < v else (v, u)
-            edge_to_tris[e].append(t_idx)
-
-    pairs = []
-    for tris in edge_to_tris.values():
-        k = len(tris)
-        if k == 2:
-            pairs.append(tris)
-        elif include_nonmanifold_pairs and k > 2:
-            for i in range(k):
-                for j in range(i + 1, k):
-                    pairs.append((tris[i], tris[j]))
-
-    if not pairs:
-        if show:
-            print("Found 0 inconsistent pairs across 0 triangles")
-        return 0
-
-    pairs = np.asarray(pairs, dtype=np.int64)
-    n1 = normals[pairs[:, 0]]
-    n2 = normals[pairs[:, 1]]
-    dots = np.einsum("ij,ij->i", n1, n2)
-    bad_pair_mask = dots < dot_threshold
-    count = int(np.count_nonzero(bad_pair_mask))
-
-    if show:
-        bad_tris_idx = np.unique(pairs[bad_pair_mask].ravel())
-        bad_mask = np.zeros(len(triangles), dtype=bool)
-        bad_mask[bad_tris_idx] = True
-
-        bg = copy.deepcopy(mesh)
-        fg = copy.deepcopy(mesh)
-
-        bg.triangles = o3d.utility.Vector3iVector(triangles[~bad_mask])
-        fg.triangles = o3d.utility.Vector3iVector(triangles[bad_mask])
-
-        bg.paint_uniform_color([0.8, 0.8, 0.8])
-        fg.paint_uniform_color([1.0, 0.0, 0.0])
-
-        print(f"Found {count} inconsistent pairs across {bad_mask.sum()} triangles")
-        o3d.visualization.draw_geometries([bg, fg])
-
-    return count
-
-
 def show_mesh_boundaries(mesh: o3d.geometry.TriangleMesh, show: bool = True, edges: bool = True, base_mesh:o3d.geometry.TriangleMesh|None=None):
     """
     Display boundary edges (preferred) or boundary vertices of a triangle mesh.
@@ -779,7 +717,7 @@ def show_mesh_boundaries(mesh: o3d.geometry.TriangleMesh, show: bool = True, edg
             print("No triangles.")
         return []
 
-    edge_counts = {}
+    edge_counts: dict = {}
     for a, b, c in tris:
         for u, v in ((a, b), (b, c), (c, a)):
             e = (u, v) if u < v else (v, u)
