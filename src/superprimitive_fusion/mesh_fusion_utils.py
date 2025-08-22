@@ -284,7 +284,7 @@ def smooth_overlap_set_cached(
 def normal_shift_smooth(
     points:         np.ndarray,                 # (N,3)
     normals:        np.ndarray,                 # (N,3)
-    weights:        np.ndarray,                 # (N,) precision for each point
+    weights:        Optional[np.ndarray],       # (N,) precision for each point, or None
     local_spacing:  np.ndarray,                 # (N,) local sampling spacing
     local_density:  np.ndarray,                 # (N,) local sampling density
     overlap_idx:    np.ndarray,                 # (L,) indices to be updated
@@ -299,20 +299,26 @@ def normal_shift_smooth(
     One pass of along-normal shifting. Assumes:
       - normals are unit-length,
       - nbr_cache[i] already lies inside the cylinder (radius r_alpha*D_i, height 2*h_alpha*D_i),
-      - weights are precisions (e.g. 1/covariance).
+      - weights are precisions (e.g. 1/covariance). If None, all neighbours are treated equally
+        with respect to the 'weights' term (i.e. that factor is omitted).
     Returns: updated (N,3) points array.
     """
 
-    points  = np.asarray(points,  dtype=np.float64)
-    normals = np.asarray(normals, dtype=np.float64)
-    weights = np.asarray(weights, dtype=np.float64)
+    points         = np.asarray(points,         dtype=np.float64)
+    normals        = np.asarray(normals,        dtype=np.float64)
+    local_spacing  = np.asarray(local_spacing,  dtype=np.float64)
+    local_density  = np.asarray(local_density,  dtype=np.float64)
+    overlap_idx    = np.asarray(overlap_idx,    dtype=np.int64)
+
+    if weights is not None:
+        weights = np.asarray(weights, dtype=np.float64)
 
     new_pts = points.copy()
     shift_idx = overlap_idx if not shift_all else range(len(points))
 
     cos_thr = np.cos(np.deg2rad(normal_diff_thresh))
     sigma_c = 0.5 * (sigma_theta ** 2)  # =~ mapping from angle sigma to cosine sigma
-    
+
     for i in shift_idx:
         p = points[i]
         n = normals[i]
@@ -322,50 +328,54 @@ def normal_shift_smooth(
         if nbr.size == 0:
             continue
 
-        pts_nbr = points[nbr]               # (k,3)
-        weights_nbr = weights[nbr]          # (k,)
-        normals_nbr = normals[nbr]          # (k,3)
+        pts_nbr     = points[nbr]               # (k,3)
+        normals_nbr = normals[nbr]              # (k,3)
 
         # Normal similarity
         cos_theta = np.einsum('ij,j->i', normals_nbr, n)
         mask_face = cos_theta >= cos_thr
-        if not np.any(mask_face): 
+        if not np.any(mask_face):
             continue
-        
-        cos_theta   = cos_theta[mask_face]
-        pts_nbr     = pts_nbr[mask_face]
-        weights_nbr = weights_nbr[mask_face]
+
+        cos_theta = cos_theta[mask_face]
+        pts_nbr   = pts_nbr[mask_face]
         normals_nbr = normals_nbr[mask_face]
 
-        diff    = pts_nbr - p               # Vectors from p to neighbours
-        h       = diff @ n                  # Signed axial offsets  (k,)
-        h2      = h * h
-        
-        r2      = np.einsum('ij,ij->i', diff, diff) - h2
-        r2      = np.maximum(r2, 0.0)       # Squared radial distance
-        
-        sigma_r     = r_alpha * Dpj         # Radius of cylinder neighbourhood
-        sigma_h     = 2.0 * h_alpha * Dpj   # Height of cylinder neighbourhood
-        
+        if weights is not None:
+            weights_nbr = weights[nbr][mask_face]
+
+        diff = pts_nbr - p                      # Vectors from p to neighbours
+        h    = diff @ n                         # Signed axial offsets  (k,)
+        h2   = h * h
+
+        r2 = np.einsum('ij,ij->i', diff, diff) - h2
+        r2 = np.maximum(r2, 0.0)                # Squared radial distance
+
+        sigma_r = r_alpha * Dpj                 # Radius of cylinder neighbourhood
+        sigma_h = 2.0 * h_alpha * Dpj           # Height of cylinder neighbourhood
+
         # Spatial Gaussian (radius and height components); summed exponents for stability
         S = r2 / (2.0 * sigma_r * sigma_r) + h2 / (2.0 * sigma_h * sigma_h)
         w_spatial = np.exp(-S)
-        
+
         w_normal = np.exp(-(1.0 - cos_theta) / (2.0 * sigma_c))
-        
-        
+
         d_rho = local_density[i] - local_density[nbr][mask_face]
-        sigma_rho   = np.max(np.abs(d_rho)) + 1e-12
+        sigma_rho = np.max(np.abs(d_rho)) + 1e-12
         w_density = np.exp(-(d_rho * d_rho) / (2.0 * sigma_rho * sigma_rho))
 
-        w = weights_nbr * w_spatial * w_density * w_normal
+        # Combine weights; omit the precision term entirely if weights is None
+        if weights is not None:
+            w = weights_nbr * w_spatial * w_density * w_normal
+        else:
+            w = w_spatial * w_density * w_normal
 
         w_sum = w.sum()
         if w_sum < 1e-12:
             continue
 
         delta_h = (w @ h) / w_sum
-        new_pts[i] = p + delta_h * n # move along normal only
+        new_pts[i] = p + delta_h * n  # move along normal only
 
     return new_pts
 
