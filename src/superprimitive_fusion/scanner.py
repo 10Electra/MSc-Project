@@ -96,6 +96,7 @@ def virtual_scan(
         width_px:   int = 360,
         height_px:  int = 240,
         fov:        float = 70.0,
+        up:         list = [0,0,1],
     ) -> dict:
 
     cam_centre_lst  = list(cam_centre) if isinstance(cam_centre, tuple) else cam_centre.tolist()
@@ -112,7 +113,7 @@ def virtual_scan(
         fov_deg=fov,
         center=look_at_lst,
         eye=cam_centre_lst,
-        up=[0, 0, 1],
+        up=up,
         width_px=width_px,
         height_px=height_px,
     )
@@ -162,7 +163,7 @@ def virtual_scan(
     scan['vcols'] = vcols
     scan['norms'] = normals
     scan['segmt'] = mesh_idx_img
-    
+
     return scan
 
 
@@ -338,174 +339,13 @@ def triangulate_rgbd_grid_grouped(verts, valid, z, obj_id,
     return object_tris
 
 
-def triangulate_rgbd_grid(
-    verts:  np.ndarray,
-    valid:  np.ndarray,
-    z:      np.ndarray,
-    obj_id: np.ndarray | None = None,
-    k:      float = 3.5,        
-    normals: np.ndarray | None = None,
-    max_normal_angle_deg: float | None = None
-    ) -> np.ndarray:
-    """
-    verts: (H*W,3) or (H,W,3)
-    valid: (H*W,) or (H,W) bool
-    z    : (H*W,) or (H,W) depth
-    obj_id: (H*W,) or (H,W) int; unknown == -1
-    normals: optional (H,W,3); if set, edges with normal jump > max_normal_angle_deg are cut
-    """
-    # reshape
-    if verts.ndim == 2:
-        N = verts.shape[0]
-        H = int(np.round(np.sqrt(N)))
-        W = N // H
-        P = verts.reshape(H, W, 3)
-    else:
-        H, W, _ = verts.shape
-        P = verts
-
-    valid_img = valid.reshape(H, W)
-    z_img = z.reshape(H, W)
-
-    # disparity (robust jumps)
-    disp = np.zeros_like(z_img, dtype=np.float32)
-    m = valid_img & np.isfinite(z_img) & (z_img > 0)
-    disp[m] = 1.0 / z_img[m]
-
-    # object ids
-    if obj_id is None:
-        obj_id = np.full((H, W), -1, dtype=np.int32)
-    else:
-        obj_id = obj_id.reshape(H, W)
-
-    # neighbor diffs
-    dx = np.abs(disp[:, 1:] - disp[:, :-1])
-    dy = np.abs(disp[1:, :] - disp[:-1, :])
-    dd1 = np.abs(disp[:-1, :-1] - disp[1:, 1:])   # tl-br
-    dd2 = np.abs(disp[:-1, 1:] - disp[1:, :-1])   # tr-bl
-
-    mask_x  = valid_img[:, 1:] & valid_img[:, :-1]
-    mask_y  = valid_img[1:, :] & valid_img[:-1, :]
-    mask_d1 = valid_img[:-1, :-1] & valid_img[1:, 1:]
-    mask_d2 = valid_img[:-1, 1:]  & valid_img[1:, :-1]
-
-    vals = np.concatenate([
-        dx[mask_x].ravel(), dy[mask_y].ravel(),
-        (dd1[mask_d1] / np.sqrt(2)).ravel(),
-        (dd2[mask_d2] / np.sqrt(2)).ravel()
-    ])
-    if vals.size:
-        med = np.median(vals)
-        mad = 1.4826 * np.median(np.abs(vals - med))
-        base_thr = med + k * mad if mad > 0 else med * 1.5
-    else:
-        base_thr = np.inf
-
-    thr_x, thr_y, thr_d = base_thr, base_thr, base_thr * np.sqrt(2)
-
-    # same-object gates (unknown == -1 → cut)
-    same_x  = (obj_id[:, 1:] == obj_id[:, :-1]) & (obj_id[:, 1:] >= 0)
-    same_y  = (obj_id[1:, :] == obj_id[:-1, :]) & (obj_id[1:, :] >= 0)
-    same_d1 = (obj_id[:-1, :-1] == obj_id[1:, 1:]) & (obj_id[:-1, :-1] >= 0)
-    same_d2 = (obj_id[:-1, 1:]  == obj_id[1:, :-1]) & (obj_id[:-1, 1:]  >= 0)
-
-    # base edge validity: depth, object, disparity
-    good_x  = mask_x  & same_x  & (dx  <= thr_x)
-    good_y  = mask_y  & same_y  & (dy  <= thr_y)
-    good_d1 = mask_d1 & same_d1 & (dd1 <= thr_d)
-    good_d2 = mask_d2 & same_d2 & (dd2 <= thr_d)
-
-    # optional: normal-angle gate
-    if (normals is not None) and (max_normal_angle_deg is not None):
-        n = normals.reshape(H, W, 3).astype(np.float32)
-        # normalize (cheap and safer; Open3D normals are ~unit but don’t rely on it)
-        n_norm = np.linalg.norm(n, axis=-1, keepdims=True)
-        ok = n_norm[..., 0] > 0
-        n = np.where(ok[..., None], n / np.clip(n_norm, 1e-12, None), 0)
-
-        cos_max = np.cos(np.deg2rad(max_normal_angle_deg))
-
-        dot_x  = (n[:, 1:, :] * n[:, :-1, :]).sum(-1)
-        dot_y  = (n[1:, :, :] * n[:-1, :, :]).sum(-1)
-        dot_d1 = (n[:-1, :-1, :] * n[1:, 1:, :]).sum(-1)
-        dot_d2 = (n[:-1, 1:, :]  * n[1:, :-1, :]).sum(-1)
-
-        # require normals to be finite on both sides
-        n_ok_x  = ok[:, 1:]  & ok[:, :-1]
-        n_ok_y  = ok[1:, :]  & ok[:-1, :]
-        n_ok_d1 = ok[:-1, :-1] & ok[1:, 1:]
-        n_ok_d2 = ok[:-1, 1:]  & ok[1:, :-1]
-
-        good_x  &= n_ok_x  & (dot_x  >= cos_max)
-        good_y  &= n_ok_y  & (dot_y  >= cos_max)
-        good_d1 &= n_ok_d1 & (dot_d1 >= cos_max)
-        good_d2 &= n_ok_d2 & (dot_d2 >= cos_max)
-
-    # indices per-quad
-    id_img = np.arange(H * W, dtype=np.int32).reshape(H, W)
-    tl = id_img[:-1, :-1]; tr = id_img[:-1, 1:]
-    bl = id_img[1:, :-1];  br = id_img[1:, 1:]
-
-    # per-quad edge masks
-    e_top    = good_x[:H-1, :W-1]
-    e_bottom = good_x[1:,  :W-1]
-    e_left   = good_y[:H-1, :W-1]
-    e_right  = good_y[:H-1, 1:]
-    d1 = good_d1
-    d2 = good_d2
-
-    # triangles for each diagonal
-    A = e_top & e_right & d1            # (tl,tr,br)
-    B = e_left & e_bottom & d1          # (tl,br,bl)
-    C = e_top & e_left & d2             # (tl,tr,bl)
-    D = e_right & e_bottom & d2         # (tr,br,bl)
-
-    # counts per orientation
-    count1 = A.astype(np.uint8) + B.astype(np.uint8)
-    count2 = C.astype(np.uint8) + D.astype(np.uint8)
-
-    # tie-break by shorter 3D diagonal; compute only where endpoints are finite (no warnings)
-    d1_len2 = np.full((H-1, W-1), np.inf, dtype=P.dtype)
-    d2_len2 = np.full((H-1, W-1), np.inf, dtype=P.dtype)
-
-    fin_d1 = np.isfinite(P[:-1, :-1, :]).all(-1) & np.isfinite(P[1:, 1:, :]).all(-1)
-    if fin_d1.any():
-        diff = P[:-1, :-1, :][fin_d1] - P[1:, 1:, :][fin_d1]
-        d1_len2[fin_d1] = (diff * diff).sum(-1)
-
-    fin_d2 = np.isfinite(P[:-1, 1:, :]).all(-1) & np.isfinite(P[1:, :-1, :]).all(-1)
-    if fin_d2.any():
-        diff = P[:-1, 1:, :][fin_d2] - P[1:, :-1, :][fin_d2]
-        d2_len2[fin_d2] = (diff * diff).sum(-1)
-
-    prefer_d1 = (count1 > count2) | ((count1 == count2) & (d1_len2 <= d2_len2))
-
-    A &= prefer_d1
-    B &= prefer_d1
-    C &= ~prefer_d1
-    D &= ~prefer_d1
-
-    # pack tris
-    tris = []
-    def add(mask, i0, i1, i2):
-        if mask.any():
-            tris.append(np.stack([i0[mask], i1[mask], i2[mask]], axis=1))
-    add(A, tl, tr, br)
-    add(B, tl, br, bl)
-    add(C, tl, tr, bl)
-    add(D, tr, br, bl)
-
-    if not tris:
-        return np.empty((0, 3), dtype=np.int32)
-    return np.concatenate(tris, axis=0).astype(np.int32)
-
-
 def mesh_depth_image(
     points:         np.ndarray,                 # (H,W,3)
     weights:        np.ndarray,                 # (H,W) or (H*W,)
     vertex_colours: np.ndarray | None,          # (H,W,3) or (H*W,3) or None
     look_dir:       np.ndarray | None,          # (3,)
     cam_centre:     np.ndarray | tuple,         # (3,)
+    z:              np.ndarray,                 # (H,W) depth along camera look axis
     segmentation:   np.ndarray | None = None,   # (H,W) int; unknown == -1
     normals:        np.ndarray | None = None,   # (H,W,3) or None
     k:              float = 3.5,
@@ -550,14 +390,6 @@ def mesh_depth_image(
 
     # Validity mask (finite and not unknown)
     valid_img = np.isfinite(points).all(axis=2) & (segmentation != -1)
-
-    # Depth proxy for triangulation (Euclidean range; keeps signature drop-in)
-    if look_dir is None:
-        z = np.linalg.norm(points - np.asarray(cam_centre, dtype=points.dtype), axis=2)
-    else:
-        assert look_dir.shape == (3,)
-        L = look_dir / np.linalg.norm(look_dir)
-        z = ((points - cam_centre) @ L).clip(min=0.0) # (H,W)
 
     # Per-object triangulation in grid index space (indices in [0..H*W))
     object_tris = triangulate_rgbd_grid_grouped(
@@ -751,13 +583,14 @@ def virtual_mesh_scan(
     sigma_floor:            float=0.00015,  # prevents infinite weights
     grazing_lambda:         float=1.0,      # sigma multiplier at grazing angles; 0 disables
     bias_k1:                float=0.0,      # e.g., 0.01–0.03 for mild bowing
-    fov_deg:                float=70.0,     # only needed if bias_k1 != 0
     seed = None,
+    include_depth_image:    bool=False,
 ) -> o3d.geometry.TriangleMesh:
     """Easy call to virtual_scan() and mesh_depth_mage()"""
 
     cam_centre_np = np.asarray(cam_centre) if isinstance(cam_centre, tuple) else cam_centre
     look_at_np = np.asarray(look_at) if isinstance(look_at, tuple) else look_at
+    up = [0, 0, 1]
     
     scan_result = virtual_scan(
         meshlist,
@@ -766,10 +599,27 @@ def virtual_mesh_scan(
         width_px=width_px,
         height_px=height_px,
         fov=fov,
+        up=up,
     )
 
     look_dir = look_at_np - cam_centre_np
     look_dir = look_dir / (np.linalg.norm(look_dir) + 1e-12)
+
+    # Calculate intrinsics
+    fx = (width_px / 2.0) / np.tan(np.deg2rad(fov) / 2.0)
+    fov_y = 2.0 * np.arctan((height_px / width_px) * np.tan(np.deg2rad(fov) / 2.0))
+    fy = (height_px / 2.0) / np.tan(fov_y / 2.0)
+    cx, cy = (width_px - 1) / 2.0, (height_px - 1) / 2.0
+    K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
+
+    # Calculate extrinsics
+    f = look_at_np - cam_centre_np; f /= np.linalg.norm(f)
+    r = np.cross(f, up); r /= np.linalg.norm(r)
+    u = np.cross(r, f)
+    R_wc = np.stack([r, u, f], axis=1)  # columns
+    R_cw = R_wc.T
+    t = -R_cw @ cam_centre_np
+    E = np.eye(4); E[:3,:3] = R_cw; E[:3,3] = t
     
     verts_noised, weights = generate_rgbd_noise(
         verts_img=scan_result['verts'],
@@ -782,9 +632,13 @@ def virtual_mesh_scan(
         grazing_lambda  = grazing_lambda,
         sigma_floor     = sigma_floor,
         bias_k1         = bias_k1,
-        fov_deg         = fov_deg,
+        fov_deg         = fov,
         seed            = seed,
     )
+
+    L = look_dir / np.linalg.norm(look_dir)
+    depth = ((verts_noised - cam_centre_np) @ L).clip(min=0.0)
+    depth_image = {'depth':depth, 'rgb':scan_result['vcols'], 'E':E, 'K_t':K}
 
     object_meshes, object_weights = mesh_depth_image(
         points=verts_noised,
@@ -792,16 +646,18 @@ def virtual_mesh_scan(
         vertex_colours=scan_result['vcols'],
         look_dir=look_dir,
         cam_centre=cam_centre_np,
+        z=depth,
         segmentation=scan_result['segmt'],
         normals=scan_result['norms'],
         k=k,
         max_normal_angle_deg=max_normal_angle_deg,
     )
-    
+    if include_depth_image:
+        return object_meshes, object_weights, depth_image
     return object_meshes, object_weights
 
 
-def fibonacci_sphere_points(n: int, radius: float) -> List[Vec3]:
+def fibonacci_sphere_points(n: int, radius: float) -> np.ndarray:
     """Roughly even points on a sphere using the Fibonacci lattice."""
     pts = []
     golden_angle = math.pi * (3 - math.sqrt(5))
@@ -812,19 +668,26 @@ def fibonacci_sphere_points(n: int, radius: float) -> List[Vec3]:
         x = math.cos(theta) * r_xy
         z = math.sin(theta) * r_xy
         pts.append((radius*x, radius*y, radius*z))
-    return pts
+    return np.asarray(pts)
 
 def capture_spherical_scans(
     meshlist:               list[o3d.geometry.TriangleMesh],
     num_views:              int = 6,
     radius:                 float = 0.3,
     look_at:                Vec3 = (0.0, 0.0, 0.0),
+    cam_offset:             np.ndarray = np.array([0.0, 0.0, 0.0]),
     width_px:               int = 180,
     height_px:              int = 120,
     fov:                    float = 70.0,
     k:                      float = 3.5,
     max_normal_angle_deg:   float | None = None,
     sampler:                str = "fibonacci",  # or "latlong"
+    linear_depth_sigma:     float=0.0002,       # linear depth term (≈ 2% of depth)
+    quadrt_depth_sigma:     float=0.0002,       # quadratic depth term
+    sigma_floor:            float=0.00015,      # prevents infinite weights
+    grazing_lambda:         float=1.0,          # sigma multiplier at grazing angles; 0 disables
+    bias_k1:                float=0.0,          # e.g., 0.01–0.03 for mild bowing
+    include_depth_images:   bool=False,
 ) -> List[Dict[str, object]]:
     """
     Capture RGB-D scans from evenly spaced viewpoints on a sphere.
@@ -837,19 +700,19 @@ def capture_spherical_scans(
     """
     # Sample viewpoints
     if sampler == "fibonacci":
-        cam_centres = fibonacci_sphere_points(num_views, radius)
+        cam_centres = list(cam_offset + fibonacci_sphere_points(num_views, radius))
     elif sampler == "latlong":
         cam_centres = []
         for i in range(num_views):
             lat = 90
             lon = (360/num_views) * i
-            cam_centres.append(polar2cartesian(r=radius, lat=lat, long=lon))
+            cam_centres.append(cam_offset + polar2cartesian(r=radius, lat=lat, long=lon))
     else:
         raise ValueError(f"Unknown sampler '{sampler}'")
 
     scans = []
     for c in cam_centres:
-        mesh = virtual_mesh_scan(
+        scan = virtual_mesh_scan(
             meshlist=meshlist,
             cam_centre=c,
             look_at=look_at,
@@ -858,9 +721,15 @@ def capture_spherical_scans(
             width_px=width_px,
             height_px=height_px,
             fov=fov,
+            linear_depth_sigma=linear_depth_sigma,
+            quadrt_depth_sigma=quadrt_depth_sigma,
+            sigma_floor=sigma_floor,
+            grazing_lambda=grazing_lambda,
+            bias_k1=bias_k1,
+            include_depth_image=include_depth_images
         )
         record = {
-            "mesh": mesh,
+            "mesh": scan,
             "cam_centre": c,
             "look_at": look_at,
         }
