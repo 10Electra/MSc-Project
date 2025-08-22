@@ -605,21 +605,14 @@ def virtual_mesh_scan(
     look_dir = look_at_np - cam_centre_np
     look_dir = look_dir / (np.linalg.norm(look_dir) + 1e-12)
 
-    # Calculate intrinsics
-    fx = (width_px / 2.0) / np.tan(np.deg2rad(fov) / 2.0)
-    fov_y = 2.0 * np.arctan((height_px / width_px) * np.tan(np.deg2rad(fov) / 2.0))
-    fy = (height_px / 2.0) / np.tan(fov_y / 2.0)
-    cx, cy = (width_px - 1) / 2.0, (height_px - 1) / 2.0
-    K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
-
-    # Calculate extrinsics
-    f = look_at_np - cam_centre_np; f /= np.linalg.norm(f)
-    r = np.cross(f, up); r /= np.linalg.norm(r)
-    u = np.cross(r, f)
-    R_wc = np.stack([r, u, f], axis=1)  # columns
-    R_cw = R_wc.T
-    t = -R_cw @ cam_centre_np
-    E = np.eye(4); E[:3,:3] = R_cw; E[:3,3] = t
+    K, E = build_K_E_from_lookat_and_rays(
+        cam_centre=cam_centre_np,
+        look_at=look_at_np,
+        width_px=width_px,
+        height_px=height_px,
+        hfov_deg=fov,
+        up_world=up,
+    )
     
     verts_noised, weights = generate_rgbd_noise(
         verts_img=scan_result['verts'],
@@ -771,3 +764,78 @@ def render_rgb_view(
     if rgb.ndim == 3 and rgb.shape[2] == 4:  # drop alpha if present
         rgb = rgb[:, :, :3]
     return rgb
+
+def build_K_E_from_lookat_and_rays(
+    cam_centre: np.ndarray,
+    look_at:    np.ndarray,
+    width_px:   int,
+    height_px:  int,
+    hfov_deg:   float,
+    up_world=(0.0, 0.0, 1.0),
+):
+    """
+    Returns:
+      K : (3,3) intrinsics (pixel units). Assumes square pixels; fx=fy from H-FOV.
+      E : (4,4) world->camera extrinsic. Camera axes: +X=right, +Y=down, +Z=forward.
+
+    Conventions:
+      - Horizontal FOV given (hfov_deg); pixel center at ((w-1)/2, (h-1)/2).
+      - 'up_world' is only used by the ray generator (Open3D) for disambiguation.
+      - Extrinsics are derived from the actual ray field to avoid convention drift.
+    """
+    cam_centre = np.asarray(cam_centre, dtype=np.float64).reshape(3)
+    look_at    = np.asarray(look_at,    dtype=np.float64).reshape(3)
+
+    # --- Intrinsics (square pixels; H-FOV given) ---
+    fx = (width_px / 2.0) / np.tan(np.deg2rad(hfov_deg) / 2.0)
+    fy = fx  # square pixels
+    cx = (width_px  - 1) / 2.0
+    cy = (height_px - 1) / 2.0
+    K = np.array([[fx, 0.0, cx],
+                  [0.0, fy, cy],
+                  [0.0, 0.0, 1.0]], dtype=np.float64)
+
+    # --- Rays (match Open3D raster convention exactly) ---
+    rays = o3d.t.geometry.RaycastingScene.create_rays_pinhole(
+        fov_deg=hfov_deg,
+        center=look_at.tolist(),
+        eye=cam_centre.tolist(),
+        up=up_world,
+        width_px=width_px,
+        height_px=height_px,
+    ).numpy().reshape(height_px, width_px, 6)
+
+    dirs = rays[..., 3:]  # (H,W,3)
+    cyi, cxi = (height_px - 1) // 2, (width_px - 1) // 2
+
+    # Center ray = +Z (forward)
+    f = dirs[cyi, cxi]
+    f /= (np.linalg.norm(f) + 1e-12)
+
+    # Image gradients → basis directions
+    dx = dirs[cyi, min(cxi+1, width_px-1)] - dirs[cyi, max(cxi-1, 0)]
+    dy = dirs[min(cyi+1, height_px-1), cxi] - dirs[max(cyi-1, 0), cxi]  # "down" in image
+
+    r = dx / (np.linalg.norm(dx) + 1e-12)  # +X = right
+    d = dy / (np.linalg.norm(dy) + 1e-12)  # +Y = down
+
+    # Orthonormalize and enforce right-handedness with r × d = f
+    d = d - np.dot(d, r) * r
+    d /= (np.linalg.norm(d) + 1e-12)
+    f = np.cross(r, d)
+    f /= (np.linalg.norm(f) + 1e-12)
+
+    # Safety: ensure proper rotation (no reflection)
+    R_wc = np.stack([r, d, f], axis=1)  # columns: right, down, forward (camera->world)
+    if np.linalg.det(R_wc) < 0:
+        r = -r
+        R_wc = np.stack([r, d, f], axis=1)
+
+    # world->camera
+    R_cw = R_wc.T
+    t = -R_cw @ cam_centre
+    E = np.eye(4, dtype=np.float64)
+    E[:3, :3] = R_cw
+    E[:3,  3] = t
+
+    return K, E
