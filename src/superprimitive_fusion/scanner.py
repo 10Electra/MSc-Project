@@ -475,6 +475,7 @@ def generate_rgbd_noise_moge_like(
     edge_mult: float = 3.0,
     grazing_lambda: float = 1.0,          # f_grazing = 1 + lambda(1 - cos(theta)), internally clamped
     corr_std_log: float = 0.015,          # low-frequency field std (log units)
+    corr_kernel_size: int = 9,            # size of correlated noise kernel
     sigma_log_floor: float = 0.007,       # floor on sigma_log (~0.7% relative)
     tau_cap: float = 1.0 / (0.003**2),    # cap on precision
     bias_k1: float = 0.0,                 # optional small radial bow (bias only)
@@ -550,7 +551,7 @@ def generate_rgbd_noise_moge_like(
             lf = rng.normal(0.0, 1.0, size=(H, W))
 
             # Box blur (k odd), output SAME size using integral image
-            k = 9
+            k = corr_kernel_size
             pad = k // 2
             # Pad, build integral image
             lf_pad = np.pad(lf, pad_width=pad, mode='edge')
@@ -837,6 +838,7 @@ def capture_spherical_scans(
     grazing_lambda:         float=1.0,          # sigma multiplier at grazing angles; 0 disables
     bias_k1:                float=0.0,          # e.g., 0.01–0.03 for mild bowing
     include_depth_images:   bool=False,
+    scan_lat:               float | None = None # latitude for 'latlong' sampling
 ) -> List[Dict[str, object]]:
     """
     Capture RGB-D scans from evenly spaced viewpoints on a sphere.
@@ -853,7 +855,7 @@ def capture_spherical_scans(
     elif sampler == "latlong":
         cam_centres = []
         for i in range(num_views):
-            lat = 90
+            lat = scan_lat if scan_lat is not None else 90.0
             lon = (360/num_views) * i
             cam_centres.append(cam_offset + polar2cartesian(r=radius, lat=lat, long=lon))
     else:
