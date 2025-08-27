@@ -21,6 +21,11 @@
   - [ ] Tests on real data
 - [ ] Write about the results (possibly after each experiment)
 
+
+- Make more clear: compact optimisation space but dense output
+- not necessarily using BiNI, using inspiration... modified code
+- alltracker
+
 ## Ideas for future works
 
 - Diffusion for point-shifting
