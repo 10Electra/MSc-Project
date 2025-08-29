@@ -333,7 +333,10 @@ def normal_shift_smooth(
 
         # Normal similarity
         cos_theta = np.einsum('ij,j->i', normals_nbr, n)
-        mask_face = cos_theta >= cos_thr
+        if weights is not None:
+            mask_face = cos_theta >= cos_thr
+        else:
+            mask_face = np.ones_like(cos_theta, dtype=bool)
         if not np.any(mask_face):
             continue
 
@@ -368,8 +371,8 @@ def normal_shift_smooth(
         if weights is not None:
             w = weights_nbr * w_spatial * w_density * w_normal
         else:
-            w = w_spatial * w_density * w_normal
-
+            w = w_spatial * w_density
+            
         w_sum = w.sum()
         if w_sum < 1e-12:
             continue
