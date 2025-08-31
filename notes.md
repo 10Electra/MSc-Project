@@ -26,6 +26,13 @@
 - not necessarily using BiNI, using inspiration... modified code
 - alltracker
 
+
+- Forget about trying to make the error model like MoGe
+- Make a new simple error model and generator
+  - Segment error, linear or quadratic?
+  - Edge error?
+- Discuss proper error modelling as future work
+
 ## Ideas for future works
 
 - Diffusion for point-shifting
