@@ -626,6 +626,9 @@ def generate_rgbd_noise(
     normals_img:    np.ndarray,                 # (H,W,3)
     segmt_img:      np.ndarray,                 # (H,W) integer labels
     *,
+    con_unc:        float = 2e-4,   # uncertainty constant term
+    lin_unc:        float = 2e-4,   # uncertainty linear term
+    qdr_unc:        float = 2e-4,   # uncertainty quadratic term
     con_perlin:     float = 2e-4,   # constant perlin noise over depth
     lin_perlin:     float = 2e-4,   # perlin linear depth term
     qdr_perlin:     float = 2e-4,   # perlin quadratic depth term
@@ -634,7 +637,6 @@ def generate_rgbd_noise(
     rot_std:        float = 0.1,    # global rotation noise std (radians, per-axis small-angle)
     trn_std:        float = 0.1,    # global translation noise std (meters, per-axis)
     grazing_lambda: float = 1.0,    # noise factor for surfaces misaligned with camera (None=0)
-    sigma_floor:    float = 1e-5,   # meters; avoid huge weights
     seed: int | None = None,
 ):
     """
@@ -686,7 +688,9 @@ def generate_rgbd_noise(
 
     # Axial std dev (meters)
     sigma_z = (con_perlin + lin_perlin * d + qdr_perlin * (d ** 2)) * grazing_boost
-    sigma_z = np.maximum(sigma_z, sigma_floor)
+
+    uncertainty = (con_unc + lin_unc * d + qdr_unc * (d**2)) * grazing_boost
+    uncertainty = np.clip(uncertainty, a_min=1e-8, a_max=None)
 
     # Perlin axial noise (image grid -> valid indices)
     P = PerlinNoise(octaves=oct_perlin, seed=int(rng.integers(0, 2**31 - 1)))
@@ -736,7 +740,7 @@ def generate_rgbd_noise(
 
     # Precision weights from axial noise only; 0 for invalid
     w = np.zeros(V_flat.shape[0], dtype=np.float32)
-    w[valid] = (1.0 / (sigma_z ** 2)).astype(np.float32)
+    w[valid] = (1.0 / (uncertainty**2)).astype(np.float32)
     weights = w.reshape(H, W)
 
     return V_out_img, weights
@@ -752,6 +756,9 @@ def virtual_mesh_scan(
     width_px:               int=360,
     height_px:              int=240,
     fov:                    float=70,
+    constant_uncertainty:   float=2e-4,
+    linear_uncertainty:     float=3e-3,     # rate of uncertainty increase with depth
+    quadrt_uncertainty:     float=1e-3,     # quadratic uncertainty coefficient
     constant_perlin_sigma:  float=2e-4,     # constant perlin noise term
     linear_perlin_sigma:    float=3e-3,     # linear depth term
     quadrt_perlin_sigma:    float=1e-3,     # quadratic depth term
@@ -759,11 +766,10 @@ def virtual_mesh_scan(
     seg_scale_std:          float=1e-4,      # std of per-segment scale noise
     rot_std:                float=1e-4,      # std of global rotation noise
     trn_std:                float=1e-3,      # std of global translation noise
-    sigma_floor:            float=0,   # prevents infinite weights
     grazing_lambda:         float=1.0,      # sigma multiplier at grazing angles; 0 disables
     seed = None,
     include_depth_image:    bool=False,
-) -> o3d.geometry.TriangleMesh:
+) -> tuple[list[o3d.geometry.TriangleMesh], list[np.ndarray]]|tuple[list[o3d.geometry.TriangleMesh], list[np.ndarray], dict]:
     """Easy call to virtual_scan() and mesh_depth_mage()"""
 
     cam_centre_np = np.asarray(cam_centre) if isinstance(cam_centre, tuple) else cam_centre
@@ -799,6 +805,9 @@ def virtual_mesh_scan(
         normals_img=scan_result['norms'],
         segmt_img=scan_result['segmt'],
         
+        con_unc=constant_uncertainty,
+        lin_unc=linear_uncertainty,
+        qdr_unc=quadrt_uncertainty,
         con_perlin=constant_perlin_sigma,
         lin_perlin=linear_perlin_sigma,
         qdr_perlin=quadrt_perlin_sigma,
@@ -807,7 +816,6 @@ def virtual_mesh_scan(
         rot_std=rot_std,
         trn_std=trn_std,
         grazing_lambda=grazing_lambda,
-        sigma_floor=sigma_floor,
         seed=seed,
     )
 
@@ -855,9 +863,12 @@ def capture_spherical_scans(
     k:                      float = 3.5,
     max_normal_angle_deg:   float | None = None,
     sampler:                str = "fibonacci",  # or "latlong"
-    constant_perlin_sigma:  float=0.0002,       # constant perlin noise
-    linear_perlin_sigma:    float=0.0002,       # linear depth term
-    quadrt_perlin_sigma:    float=0.0002,       # quadratic depth term
+    constant_uncertainty:   float=2e-4,
+    linear_uncertainty:     float=3e-3,
+    quadrt_uncertainty:     float=1e-3,
+    constant_perlin_sigma:  float=2e-4,         # constant perlin noise
+    linear_perlin_sigma:    float=3e-3,         # linear depth term
+    quadrt_perlin_sigma:    float=1e-3,         # quadratic depth term
     perlin_octaves:         int=3,              # octaves =~ scale of perlin noise
     seg_scale_std:          float=0.1,          # per segment scale noise std
     rot_std:                float=0.1,          # global rotation noise std
@@ -899,6 +910,9 @@ def capture_spherical_scans(
             width_px=width_px,
             height_px=height_px,
             fov=fov,
+            constant_uncertainty=constant_uncertainty,
+            linear_uncertainty=linear_uncertainty,
+            quadrt_uncertainty=quadrt_uncertainty,
             constant_perlin_sigma=constant_perlin_sigma,
             linear_perlin_sigma=linear_perlin_sigma,
             quadrt_perlin_sigma=quadrt_perlin_sigma,
@@ -906,7 +920,6 @@ def capture_spherical_scans(
             seg_scale_std=seg_scale_std,
             rot_std=rot_std,
             trn_std=trn_std,
-            sigma_floor=sigma_floor,
             grazing_lambda=grazing_lambda,
             seed=None,
             include_depth_image=include_depth_images,
