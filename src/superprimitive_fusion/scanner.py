@@ -622,50 +622,48 @@ def generate_rgbd_noise_moge_like(
 
 
 def generate_rgbd_noise(
-    verts_img:      np.ndarray,                 # (H,W,3) or (N,3); may contain inf/NaN
+    verts_img:      np.ndarray,                 # (H,W,3); may contain inf/NaN
     cam_centre:     np.ndarray | tuple,
     look_dir:       np.ndarray | tuple,
-    normals_img:    np.ndarray,   # same layout as verts if provided
-    segmt_img:      np.ndarray,
+    normals_img:    np.ndarray,                 # (H,W,3)
+    segmt_img:      np.ndarray,                 # (H,W) integer labels
     *,
     con_perlin:     float = 2e-4,   # constant perlin noise over depth
     lin_perlin:     float = 2e-4,   # perlin linear depth term
     qdr_perlin:     float = 2e-4,   # perlin quadratic depth term
     oct_perlin:     int = 3,        # perlin number of octaves
-    seg_scale_std:  float = 0.1,    # per-segment scale noise standard deviation (scalfac = 1+N(0,std))
-    rot_std:        float = 0.1,    # rotation noise standard deviation
-    trn_std:        float = 0.1,    # translation noise standard deviation
-    grazing_lambda: float = 1.0,    # noise factor for surfaces misaligned with camera
+    seg_scale_std:  float = 0.1,    # per-segment scale noise std (scalefac = 1 + N(0,std))
+    rot_std:        float = 0.1,    # global rotation noise std (radians, per-axis small-angle)
+    trn_std:        float = 0.1,    # global translation noise std (meters, per-axis)
+    grazing_lambda: float = 1.0,    # noise factor for surfaces misaligned with camera (None=0)
     sigma_floor:    float = 1e-5,   # meters; avoid huge weights
     seed: int | None = None,
 ):
     """
     Returns:
-      verts_noised : same shape as verts_img, with inf/NaN preserved at original pixels
-      weights      : (H,W) if input is (H,W,3), else (N,), precision along ray; 0 for invalid
+      verts_noised : same shape as verts_img, with inf/NaN preserved
+      weights      : (H,W) precision along ray; 0 for invalid
     """
+    # --- Assumptions (simplify!) ---
+    assert verts_img.ndim == 3 and verts_img.shape[2] == 3
+    assert normals_img.shape == verts_img.shape
+    assert segmt_img.shape[:2] == verts_img.shape[:2]
+
     rng = np.random.default_rng(seed)
     H, W, _ = verts_img.shape
 
-    V = np.asarray(verts_img)
-    orig_dtype = V.dtype
-    is_image = (V.ndim == 3)
+    # Flatten
+    V = np.asarray(verts_img, dtype=np.float64)
+    N = np.asarray(normals_img, dtype=np.float64)
+    S = np.asarray(segmt_img)
+    V_flat = V.reshape(-1, 3)
+    N_flat = N.reshape(-1, 3)
+    S_flat = S.reshape(-1)
 
-    # Flatten to (N,3) view; we'll write back into a copy
-    V_flat = V.reshape(-1, 3).astype(np.float64, copy=False)
-    N_flat = normals_img.reshape(-1, 3).astype(np.float64, copy=False)
-    S_flat = segmt_img.reshape(-1, 3)
-
-    # A vertex is valid iff all 3 components are finite
+    # Valid mask (all coords finite)
     valid = np.isfinite(V_flat).all(axis=1)
     if not np.any(valid):
-        # Nothing to do
-        weights = np.zeros(V.shape[:2] if is_image else (V_flat.shape[0],), dtype=np.float32)
-        return V.copy(), weights
-
-    Vv = V_flat[valid]
-    Nv = N_flat[valid]
-    Sv = S_flat[valid]
+        return verts_img.copy(), np.zeros((H, W), dtype=np.float32)
 
     # Camera vectors
     C = np.asarray(cam_centre, dtype=np.float64).reshape(1, 3)
@@ -673,49 +671,78 @@ def generate_rgbd_noise(
     L /= (np.linalg.norm(L) + 1e-12)
 
     # Geometry for valid points
-    R  = Vv - C                             # camera -> point
-    d  = R @ L                              # depth along camera forward
-    d  = np.maximum(d, 0.0)
-    Rn = np.linalg.norm(R, axis=1, keepdims=True)
-    ray_dir = R / np.maximum(Rn, 1e-12)     # per-pixel viewing ray (unit)
+    Vv = V_flat[valid]
+    Nv = N_flat[valid]
+    Sv = S_flat[valid]
+
+    R_cam = Vv - C                                # camera -> point
+    d = (R_cam @ L)                               # depth along camera forward
+    d = np.maximum(d, 0.0)
+    Rn = np.linalg.norm(R_cam, axis=1, keepdims=True)
+    ray_dir = R_cam / np.maximum(Rn, 1e-12)       # unit viewing ray
 
     # Grazing term
-    if Nv is not None:
-        Nv = Nv / (np.linalg.norm(Nv, axis=1, keepdims=True) + 1e-12)
-        cos_th = np.abs(np.sum(Nv * (-ray_dir), axis=1))
-    else:
-        cos_th = np.abs(ray_dir @ (-L))
+    Nv = Nv / (np.linalg.norm(Nv, axis=1, keepdims=True) + 1e-12)
+    cos_th = np.abs(np.sum(Nv * (-ray_dir), axis=1))
     grazing_boost = 1.0 + grazing_lambda * (1.0 - cos_th)
 
     # Axial std dev (meters)
     sigma_z = (con_perlin + lin_perlin * d + qdr_perlin * (d ** 2)) * grazing_boost
     sigma_z = np.maximum(sigma_z, sigma_floor)
-    
-    # Add normalised Perlin noise
-    P = PerlinNoise(octaves=oct_perlin)
-    p_noise = np.array([[P([i/W, j/H]) for j in range(W)] for i in range(H)])
-    p_noise = (p_noise - p_noise.mean()) / p_noise.std()
-    p_noise *= sigma_z
-    disp = p_noise.reshape(-1)[:,None] * ray_dir
-    
-    # Add per-segment scale noise
-    u, inv = np.unique(Sv, return_inverse=True)
-    scale_noise_values = np.random.randn(len(u))*seg_scale_std # one sample per segment
-    scale_noise_img = scale_noise_values[inv]
-    disp += d * scale_noise_img
 
-    # Write back into a copy, preserving invalid pixels as-is (inf/NaN)
+    # Perlin axial noise (image grid -> valid indices)
+    P = PerlinNoise(octaves=oct_perlin, seed=int(rng.integers(0, 2**31 - 1)))
+    p = np.empty((H, W), dtype=np.float64)
+    # x = columns/W, y = rows/H
+    for i in range(H):
+        for j in range(W):
+            p[i, j] = P([j / float(W), i / float(H)])
+
+    p_valid = p.reshape(-1)[valid]
+    mu, sd = p_valid.mean(), p_valid.std()
+    z = np.zeros_like(p_valid) if sd < 1e-12 else (p_valid - mu) / sd
+
+    axial_disp = (z * sigma_z)[:, None] * ray_dir   # (M,3)
+
+    # Per-segment isotropic scaling about camera centre
+    if seg_scale_std > 0.0:
+        labels, inv = np.unique(Sv, return_inverse=True)
+        scalefacs = 1.0 + rng.normal(0.0, seg_scale_std, size=labels.shape[0])
+        s = scalefacs[inv]  # (M,)
+        scale_disp = ((s - 1.0)[:, None]) * R_cam   # scale about C
+    else:
+        scale_disp = 0.0
+
+    Vv_noised = Vv + axial_disp + scale_disp
+
+    # Global rigid perturbation (single R,t for the whole image)
+    if (rot_std > 0.0) or (trn_std > 0.0):
+        r = rng.normal(0.0, rot_std, size=3)
+        theta = np.linalg.norm(r)
+        if theta < 1e-12:
+            Rmat = np.eye(3, dtype=np.float64)
+        else:
+            k = r / theta
+            K = np.array([[0.0,   -k[2],  k[1]],
+                          [k[2],   0.0,  -k[0]],
+                          [-k[1],  k[0],  0.0]], dtype=np.float64)
+            Rmat = np.eye(3) + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
+
+        t = rng.normal(0.0, trn_std, size=3).astype(np.float64)
+        Vv_noised = C + (Vv_noised - C) @ Rmat.T + t
+
+    # Write back, preserve invalids
     V_out = V_flat.copy()
-    V_out[valid] = (Vv + disp).astype(orig_dtype, copy=False)
-    V_out_img = V_out.reshape(V.shape)
+    V_out[valid] = Vv_noised
+    V_out_img = V_out.reshape(H, W, 3).astype(verts_img.dtype, copy=False)
 
-    # Per-vertex precision from axial jitter only; 0 for invalid
+    # Precision weights from axial noise only; 0 for invalid
     w = np.zeros(V_flat.shape[0], dtype=np.float32)
     w[valid] = (1.0 / (sigma_z ** 2)).astype(np.float32)
+    weights = w.reshape(H, W)
 
-    weights = w.reshape(V.shape[:2] if is_image else (-1,))
-    
     return V_out_img, weights
+
 
 
 def virtual_mesh_scan(
@@ -727,11 +754,15 @@ def virtual_mesh_scan(
     width_px:               int=360,
     height_px:              int=240,
     fov:                    float=70,
-    linear_depth_sigma:     float=0.0002,   # linear depth term (≈ 2% of depth)
-    quadrt_depth_sigma:     float=0.0002,   # quadratic depth term
-    sigma_floor:            float=0.00015,  # prevents infinite weights
+    constant_perlin_sigma:  float=2e-4,     # constant perlin noise term
+    linear_perlin_sigma:    float=2e-4,     # linear depth term
+    quadrt_perlin_sigma:    float=2e-4,     # quadratic depth term
+    perlin_octaves:         int=3,
+    seg_scale_std:          float=0.1,      # std of per-segment scale noise
+    rot_std:                float=0.1,      # std of global rotation noise
+    trn_std:                float=0.1,      # std of global translation noise
+    sigma_floor:            float=1.5e-4,   # prevents infinite weights
     grazing_lambda:         float=1.0,      # sigma multiplier at grazing angles; 0 disables
-    bias_k1:                float=0.0,      # e.g., 0.01–0.03 for mild bowing
     seed = None,
     include_depth_image:    bool=False,
 ) -> o3d.geometry.TriangleMesh:
@@ -768,13 +799,18 @@ def virtual_mesh_scan(
         cam_centre=cam_centre,
         look_dir=look_dir,
         normals_img=scan_result['norms'],
-        segmentation=scan_result['segmt'],
+        segmt_img=scan_result['segmt'],
         
-        alpha           = linear_depth_sigma,
-        beta            = quadrt_depth_sigma,
-        grazing_lambda  = grazing_lambda,
-        sigma_floor     = sigma_floor,
-        seed            = seed,
+        con_perlin=constant_perlin_sigma,
+        lin_perlin=linear_perlin_sigma,
+        qdr_perlin=quadrt_perlin_sigma,
+        oct_perlin=perlin_octaves,
+        seg_scale_std=seg_scale_std,
+        rot_std=rot_std,
+        trn_std=trn_std,
+        grazing_lambda=grazing_lambda,
+        sigma_floor=sigma_floor,
+        seed=seed,
     )
 
     L = look_dir / np.linalg.norm(look_dir)
@@ -823,8 +859,13 @@ def capture_spherical_scans(
     k:                      float = 3.5,
     max_normal_angle_deg:   float | None = None,
     sampler:                str = "fibonacci",  # or "latlong"
-    linear_depth_sigma:     float=0.0002,       # linear depth term (≈ 2% of depth)
-    quadrt_depth_sigma:     float=0.0002,       # quadratic depth term
+    constant_perlin_sigma:  float=0.0002,       # constant perlin noise
+    linear_perlin_sigma:    float=0.0002,       # linear depth term
+    quadrt_perlin_sigma:    float=0.0002,       # quadratic depth term
+    perlin_octaves:         int=3,              # octaves =~ scale of perlin noise
+    seg_scale_std:          float=0.1,          # per segment scale noise std
+    rot_std:                float=0.1,          # global rotation noise std
+    trn_std:                float=0.1,          # global translation noise std
     sigma_floor:            float=0.00015,      # prevents infinite weights
     grazing_lambda:         float=1.0,          # sigma multiplier at grazing angles; 0 disables
     bias_k1:                float=0.0,          # e.g., 0.01–0.03 for mild bowing
@@ -863,12 +904,17 @@ def capture_spherical_scans(
             width_px=width_px,
             height_px=height_px,
             fov=fov,
-            linear_depth_sigma=linear_depth_sigma,
-            quadrt_depth_sigma=quadrt_depth_sigma,
+            constant_perlin_sigma=constant_perlin_sigma,
+            linear_perlin_sigma=linear_perlin_sigma,
+            quadrt_perlin_sigma=quadrt_perlin_sigma,
+            perlin_octaves=perlin_octaves,
+            seg_scale_std=seg_scale_std,
+            rot_std=rot_std,
+            trn_std=trn_std,
             sigma_floor=sigma_floor,
             grazing_lambda=grazing_lambda,
-            bias_k1=bias_k1,
-            include_depth_image=include_depth_images
+            seed=None,
+            include_depth_image=include_depth_images,
         )
         record = {
             "mesh": scan,
