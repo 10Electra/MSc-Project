@@ -29,8 +29,10 @@
 
 - Forget about trying to make the error model like MoGe
 - Make a new simple error model and generator
-  - Segment error, linear or quadratic?
-  - Edge error?
+  - Segment scale error (linear)
+  - Point error but with area of effect
+  - Edge error
+  - Alignment error
 - Discuss proper error modelling as future work
 
 ## Ideas for future works

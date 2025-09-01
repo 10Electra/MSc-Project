@@ -2,6 +2,7 @@ import math
 import numpy as np
 import open3d as o3d  # type: ignore
 from typing import Tuple, Dict, List
+from perlin_noise import PerlinNoise
 
 from superprimitive_fusion.utils import (
     polar2cartesian,
@@ -621,19 +622,21 @@ def generate_rgbd_noise_moge_like(
 
 
 def generate_rgbd_noise(
-    verts_img:  np.ndarray,                 # (H,W,3) or (N,3); may contain inf/NaN
-    cam_centre: np.ndarray | tuple,
-    look_dir:   np.ndarray | tuple,
-    normals_img:np.ndarray | None = None,   # same layout as verts if provided
+    verts_img:      np.ndarray,                 # (H,W,3) or (N,3); may contain inf/NaN
+    cam_centre:     np.ndarray | tuple,
+    look_dir:       np.ndarray | tuple,
+    normals_img:    np.ndarray,   # same layout as verts if provided
+    segmt_img:      np.ndarray,
     *,
-    # axial noise model: sigma_z = (alpha*d + beta*d^2) * (1 + lambda*(1-cos(theta)))
-    alpha:          float = 2e-4,
-    beta:           float = 2e-4,
-    grazing_lambda: float = 1.0,
-    sigma_floor:    float = 1e-4,           # meters; avoid huge weights
-    # optional low-frequency radial bias (kept out of sigma)
-    bias_k1: float = 0.0,                   # 0 disables; try 0.01–0.02 for mild bow
-    fov_deg: float = 70.0,
+    con_perlin:     float = 2e-4,   # constant perlin noise over depth
+    lin_perlin:     float = 2e-4,   # perlin linear depth term
+    qdr_perlin:     float = 2e-4,   # perlin quadratic depth term
+    oct_perlin:     int = 3,        # perlin number of octaves
+    seg_scale_std:  float = 0.1,    # per-segment scale noise standard deviation (scalfac = 1+N(0,std))
+    rot_std:        float = 0.1,    # rotation noise standard deviation
+    trn_std:        float = 0.1,    # translation noise standard deviation
+    grazing_lambda: float = 1.0,    # noise factor for surfaces misaligned with camera
+    sigma_floor:    float = 1e-5,   # meters; avoid huge weights
     seed: int | None = None,
 ):
     """
@@ -642,6 +645,7 @@ def generate_rgbd_noise(
       weights      : (H,W) if input is (H,W,3), else (N,), precision along ray; 0 for invalid
     """
     rng = np.random.default_rng(seed)
+    H, W, _ = verts_img.shape
 
     V = np.asarray(verts_img)
     orig_dtype = V.dtype
@@ -649,6 +653,8 @@ def generate_rgbd_noise(
 
     # Flatten to (N,3) view; we'll write back into a copy
     V_flat = V.reshape(-1, 3).astype(np.float64, copy=False)
+    N_flat = normals_img.reshape(-1, 3).astype(np.float64, copy=False)
+    S_flat = segmt_img.reshape(-1, 3)
 
     # A vertex is valid iff all 3 components are finite
     valid = np.isfinite(V_flat).all(axis=1)
@@ -658,13 +664,8 @@ def generate_rgbd_noise(
         return V.copy(), weights
 
     Vv = V_flat[valid]
-
-    # Normals: optional, aligned to verts; select the same valid subset
-    if normals_img is not None:
-        N_in = np.asarray(normals_img).reshape(-1, 3)
-        Nv = N_in[valid].astype(np.float64, copy=False)
-    else:
-        Nv = None
+    Nv = N_flat[valid]
+    Sv = S_flat[valid]
 
     # Camera vectors
     C = np.asarray(cam_centre, dtype=np.float64).reshape(1, 3)
@@ -687,30 +688,21 @@ def generate_rgbd_noise(
     grazing_boost = 1.0 + grazing_lambda * (1.0 - cos_th)
 
     # Axial std dev (meters)
-    sigma_z = (alpha * d + beta * (d ** 2)) * grazing_boost
+    sigma_z = (con_perlin + lin_perlin * d + qdr_perlin * (d ** 2)) * grazing_boost
     sigma_z = np.maximum(sigma_z, sigma_floor)
-
-    # Sample zero-mean axial noise
-    n_ax = rng.normal(0.0, sigma_z)
-    disp = n_ax[:, None] * ray_dir
-
-    # Optional simple radial bias (kept out of sigma/weights)
-    if bias_k1 != 0.0:
-        # Build (right, up) camera basis
-        up_guess = np.array([0.0, 1.0, 0.0], dtype=np.float64)
-        if abs(np.dot(up_guess, L)) > 0.95:
-            up_guess = np.array([0.0, 0.0, 1.0], dtype=np.float64)
-        right = np.cross(L, up_guess); right /= (np.linalg.norm(right) + 1e-12)
-        up    = np.cross(right, L)
-
-        denom = d + 1e-12
-        x = (R @ right) / denom
-        y = (R @ up)    / denom
-        scale = np.tan(np.deg2rad(fov_deg) * 0.5)
-        xn, yn = x / scale, y / scale
-        r2 = xn * xn + yn * yn
-
-        disp += (bias_k1 * d * r2)[:, None] * ray_dir
+    
+    # Add normalised Perlin noise
+    P = PerlinNoise(octaves=oct_perlin)
+    p_noise = np.array([[P([i/W, j/H]) for j in range(W)] for i in range(H)])
+    p_noise = (p_noise - p_noise.mean()) / p_noise.std()
+    p_noise *= sigma_z
+    disp = p_noise.reshape(-1)[:,None] * ray_dir
+    
+    # Add per-segment scale noise
+    u, inv = np.unique(Sv, return_inverse=True)
+    scale_noise_values = np.random.randn(len(u))*seg_scale_std # one sample per segment
+    scale_noise_img = scale_noise_values[inv]
+    disp += d * scale_noise_img
 
     # Write back into a copy, preserving invalid pixels as-is (inf/NaN)
     V_out = V_flat.copy()
@@ -776,13 +768,12 @@ def virtual_mesh_scan(
         cam_centre=cam_centre,
         look_dir=look_dir,
         normals_img=scan_result['norms'],
+        segmentation=scan_result['segmt'],
         
         alpha           = linear_depth_sigma,
         beta            = quadrt_depth_sigma,
         grazing_lambda  = grazing_lambda,
         sigma_floor     = sigma_floor,
-        bias_k1         = bias_k1,
-        fov_deg         = fov,
         seed            = seed,
     )
 
