@@ -344,8 +344,6 @@ def mesh_depth_image(
     points:         np.ndarray,                 # (H,W,3)
     weights:        np.ndarray,                 # (H,W) or (H*W,)
     vertex_colours: np.ndarray | None,          # (H,W,3) or (H*W,3) or None
-    look_dir:       np.ndarray | None,          # (3,)
-    cam_centre:     np.ndarray | tuple,         # (3,)
     z:              np.ndarray,                 # (H,W) depth along camera look axis
     segmentation:   np.ndarray | None = None,   # (H,W) int; unknown == -1
     normals:        np.ndarray | None = None,   # (H,W,3) or None
@@ -755,13 +753,13 @@ def virtual_mesh_scan(
     height_px:              int=240,
     fov:                    float=70,
     constant_perlin_sigma:  float=2e-4,     # constant perlin noise term
-    linear_perlin_sigma:    float=2e-4,     # linear depth term
-    quadrt_perlin_sigma:    float=2e-4,     # quadratic depth term
+    linear_perlin_sigma:    float=3e-3,     # linear depth term
+    quadrt_perlin_sigma:    float=1e-3,     # quadratic depth term
     perlin_octaves:         int=3,
-    seg_scale_std:          float=0.1,      # std of per-segment scale noise
-    rot_std:                float=0.1,      # std of global rotation noise
-    trn_std:                float=0.1,      # std of global translation noise
-    sigma_floor:            float=1.5e-4,   # prevents infinite weights
+    seg_scale_std:          float=1e-4,      # std of per-segment scale noise
+    rot_std:                float=1e-4,      # std of global rotation noise
+    trn_std:                float=1e-3,      # std of global translation noise
+    sigma_floor:            float=0,   # prevents infinite weights
     grazing_lambda:         float=1.0,      # sigma multiplier at grazing angles; 0 disables
     seed = None,
     include_depth_image:    bool=False,
@@ -821,8 +819,6 @@ def virtual_mesh_scan(
         points=verts_noised,
         weights=weights,
         vertex_colours=scan_result['vcols'],
-        look_dir=look_dir,
-        cam_centre=cam_centre_np,
         z=depth,
         segmentation=scan_result['segmt'],
         normals=scan_result['norms'],
@@ -868,7 +864,6 @@ def capture_spherical_scans(
     trn_std:                float=0.1,          # global translation noise std
     sigma_floor:            float=0.00015,      # prevents infinite weights
     grazing_lambda:         float=1.0,          # sigma multiplier at grazing angles; 0 disables
-    bias_k1:                float=0.0,          # e.g., 0.01–0.03 for mild bowing
     include_depth_images:   bool=False,
     scan_lat:               float | None = None # latitude for 'latlong' sampling
 ) -> List[Dict[str, object]]:
