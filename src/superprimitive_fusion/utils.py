@@ -450,3 +450,24 @@ def distinct_colours(n: int, *, s: float = 0.9, v: float = 0.9) -> np.ndarray:
 
     return rgb
 
+def plot_images(images, max_cols=5, titles=None, per_img_width=3, cmap=None, cbar_cols=None, cbar_kw=None):
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    n = len(images)
+    h_to_w = images[0].shape[0] / images[0].shape[1]
+    cols = max(1, min(max_cols, n))
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(cols*per_img_width, rows*per_img_width*h_to_w), squeeze=False)
+    axes = axes.ravel()
+    for i, ax in enumerate(axes):
+        if i >= n: ax.axis('off'); continue
+        img = images[i]
+        arr = plt.imread(img) if isinstance(img, (str, os.PathLike)) else np.asarray(img)
+        im = ax.imshow(arr, cmap=(cmap if arr.ndim == 2 else None))
+        ax.set_xticks([]); ax.set_yticks([])
+        for s in ax.spines.values(): s.set_visible(False)
+        if titles and i < len(titles) and titles[i]: ax.set_title(titles[i], fontsize=9, pad=2)
+        if arr.ndim == 2 and cbar_cols and (i % cols) in cbar_cols:
+            cax = make_axes_locatable(ax).append_axes("right", size="5%", pad=0.02)
+            fig.colorbar(im, cax=cax, **(cbar_kw or {}))
+    plt.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
+    return fig, axes[:n]

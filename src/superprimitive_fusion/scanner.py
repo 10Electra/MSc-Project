@@ -821,7 +821,7 @@ def virtual_mesh_scan(
 
     L = look_dir / np.linalg.norm(look_dir)
     depth = ((verts_noised - cam_centre_np) @ L).clip(min=0.0)
-    depth_image = {'depth':depth, 'rgb':scan_result['vcols'], 'E':E, 'K_t':K}
+    depth_image = {'depth':depth, 'rgb':scan_result['vcols'], 'segmt':scan_result['segmt'], 'E':E, 'K_t':K}
 
     object_meshes, object_weights = mesh_depth_image(
         points=verts_noised,
@@ -873,7 +873,6 @@ def capture_spherical_scans(
     seg_scale_std:          float=0.1,          # per segment scale noise std
     rot_std:                float=0.1,          # global rotation noise std
     trn_std:                float=0.1,          # global translation noise std
-    sigma_floor:            float=0.00015,      # prevents infinite weights
     grazing_lambda:         float=1.0,          # sigma multiplier at grazing angles; 0 disables
     include_depth_images:   bool=False,
     scan_lat:               float | None = None # latitude for 'latlong' sampling
