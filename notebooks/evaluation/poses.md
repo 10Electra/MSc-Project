@@ -193,20 +193,20 @@ for i in range(360//c):
 
 tsdf_lo: 3.1
 tsdf_lo_sm: 3.1
-tsdf_hi: 3.8
-tsdf_hi_sm: 4.5
+tsdf_hi: 4.2
+tsdf_hi_sm: 5.0
 sdf_unc: 142.0
 sdf_van: 95.4
 
 
 tsdf_lo
-
-tsdf_lo_sm
+438315
 
 tsdf_hi
 
-tsdf_hi_sm
 
 sdf_unc
+453308
 
 sdf_van
+431616

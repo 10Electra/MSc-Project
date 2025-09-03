@@ -838,8 +838,12 @@ def virtual_mesh_scan(
     return object_meshes, object_weights
 
 
-def fibonacci_sphere_points(n: int, radius: float) -> np.ndarray:
+def fibonacci_sphere_points(n: int, radius: float|list) -> np.ndarray:
     """Roughly even points on a sphere using the Fibonacci lattice."""
+    if isinstance(radius, float):
+        radii = [radius]*n
+    else:
+        radii = radius
     pts = []
     golden_angle = math.pi * (3 - math.sqrt(5))
     for i in range(n):
@@ -848,13 +852,13 @@ def fibonacci_sphere_points(n: int, radius: float) -> np.ndarray:
         theta = i * golden_angle
         x = math.cos(theta) * r_xy
         z = math.sin(theta) * r_xy
-        pts.append((radius*x, radius*y, radius*z))
+        pts.append((radii[i]*x, radii[i]*y, radii[i]*z))
     return np.asarray(pts)
 
 def capture_spherical_scans(
     meshlist:               list[o3d.geometry.TriangleMesh],
     num_views:              int = 6,
-    radius:                 float = 0.3,
+    radius:                 float | list = 0.3,
     look_at:                Vec3 = (0.0, 0.0, 0.0),
     cam_offset:             np.ndarray = np.array([0.0, 0.0, 0.0]),
     width_px:               int = 180,
@@ -891,10 +895,11 @@ def capture_spherical_scans(
         cam_centres = list(cam_offset + fibonacci_sphere_points(num_views, radius))
     elif sampler == "latlong":
         cam_centres = []
+        radii = radius if isinstance(radius, list) else [radius]*num_views
         for i in range(num_views):
             lat = scan_lat if scan_lat is not None else 90.0
             lon = (360/num_views) * i
-            cam_centres.append(cam_offset + polar2cartesian(r=radius, lat=lat, long=lon))
+            cam_centres.append(cam_offset + polar2cartesian(r=radii[i], lat=lat, long=lon))
     else:
         raise ValueError(f"Unknown sampler '{sampler}'")
 
