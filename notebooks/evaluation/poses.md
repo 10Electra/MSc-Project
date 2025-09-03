@@ -153,3 +153,60 @@ tsdf_hi
 
 tsdf_hi_sm
 {'mse': 0.003271854596404237, 'iou': 0.9983063692830487}
+
+
+### Scene
+cam_offset=obj_centre
+look_at = obj_centre
+width: int = 360
+height: int = 240
+fov: float = 70.0
+k: float = 3
+a = 45
+c = int(360/10)
+rs = (0.45, 0.45)
+ls = (50, 80)
+for i in range(360//c):
+    r = rs[0] if i%2==0 else rs[1]
+    l = ls[0] if i%2==0 else ls[1]
+    ccs.append(cam_offset + polar2cartesian(r=r, lat=l, long=a+i*c))
+
+{
+	"class_name" : "ViewTrajectory",
+	"interval" : 29,
+	"is_loop" : false,
+	"trajectory" : 
+	[
+		{
+			"boundingbox_max" : [ 0.89999419450759888, 0.44999271631240845, 0.97084990505266999 ],
+			"boundingbox_min" : [ -0.89998292922975187, -0.45000013709068298, 0.71999996900552343 ],
+			"field_of_view" : 60.0,
+			"front" : [ 0.052072202370523381, 0.89322812194070089, 0.44657810953356403 ],
+			"lookat" : [ 5.6326389235028529e-06, -3.7103891372680664e-06, 0.84542493702909671 ],
+			"up" : [ -0.015416323196240082, -0.44641250866415461, 0.89469447806906921 ],
+			"zoom" : 0.11999999999999962
+		}
+	],
+	"version_major" : 1,
+	"version_minor" : 0
+}
+
+tsdf_lo: 3.1
+tsdf_lo_sm: 3.1
+tsdf_hi: 3.8
+tsdf_hi_sm: 4.5
+sdf_unc: 142.0
+sdf_van: 95.4
+
+
+tsdf_lo
+
+tsdf_lo_sm
+
+tsdf_hi
+
+tsdf_hi_sm
+
+sdf_unc
+
+sdf_van

@@ -48,10 +48,10 @@ def tsdf_fuse(
     return mesh
 
 def tsdf_fuse_from_depth_data(depth_data, voxel_length=1./1024, trunc_voxels=5):
-    depth_images = [d['depth'] for d in depth_data]
+    depth_images = [d['depth'].copy() for d in depth_data]
     for d in depth_images:
         d[~np.isfinite(d)] = 0
-    rgb_images   = [d['rgb'] for d in depth_data]
+    rgb_images   = [d['rgb'].copy() for d in depth_data]
     K            = depth_data[0]['K_t']
 
     T_wc = [d['E'] for d in depth_data]
