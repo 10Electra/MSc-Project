@@ -38,6 +38,8 @@ def fuse_meshes(
     shift_all: bool = False,
     ball_radius_percentiles: list = [10, 50, 90],
     bilateral_weight_update: bool = False,
+    density_term: bool = True,
+    resp_frac: float = 1.0,
 ) -> Tuple[o3d.geometry.TriangleMesh, Optional[np.ndarray]]:
     """Fuses two registered open3d triangle meshes.
 
@@ -144,6 +146,7 @@ def fuse_meshes(
             huber_delta=1.345,
             tau_max=tau_max,
             bilateral=bilateral_weight_update,
+            resp_frac=resp_frac,
         )
 
     # ---------------------------------------------------------------------
@@ -151,7 +154,7 @@ def fuse_meshes(
     # ---------------------------------------------------------------------
     normal_shifted_points = points.copy()
     for _ in range(nrm_shift_iters):
-        normal_shifted_points = normal_shift_smooth(normal_shifted_points, normals, updated_weights, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, sigma_theta, normal_diff_thresh, shift_all)
+        normal_shifted_points = normal_shift_smooth(normal_shifted_points, normals, updated_weights, local_spacing, local_density, overlap_idx, nbr_cache, r_alpha, h_alpha, sigma_theta, normal_diff_thresh, shift_all, density_term)
     
     kd_tree = o3d.geometry.KDTreeFlann(normal_shifted_points.T)
 

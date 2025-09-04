@@ -294,6 +294,7 @@ def normal_shift_smooth(
     sigma_theta:        float | None = None,        # Normal angle difference std (related to sharpness)
     normal_diff_thresh: float | None = None,        # degrees; hard front-facing gate
     shift_all:          bool = False,               # All pts or just overlap
+    density_term:       bool = True,
 ) -> np.ndarray:
     """
     One pass of along-normal shifting. Assumes:
@@ -372,7 +373,11 @@ def normal_shift_smooth(
 
         d_rho = local_density[i] - local_density[nbr][mask_face]
         sigma_rho = np.max(np.abs(d_rho)) + 1e-12
-        w_density = np.exp(-(d_rho * d_rho) / (2.0 * sigma_rho * sigma_rho))
+
+        if density_term:
+            w_density = np.exp(-(d_rho * d_rho) / (2.0 * sigma_rho * sigma_rho))
+        else:
+            w_density = np.ones_like(w_spatial)
 
         # Combine weights; omit the precision term entirely if weights is None
         if weights is not None:
@@ -780,10 +785,11 @@ def update_weights(
         overlap_mask:       np.ndarray,
         scan_ids:           np.ndarray,
         nbr_cache:          np.ndarray,
-        normal_diff_thresh: float       =45.0,
+        normal_diff_thresh: float|None  =45.0,
         huber_delta:        float|None  =1.345,
         tau_max:            float|None  =None,
         bilateral:          bool        =False,
+        resp_frac:          float       =1.0,
     ) -> np.ndarray:
 
     weights_out = weights.copy()
@@ -807,9 +813,12 @@ def update_weights(
             n_xs = normals[ixs]
 
             # Calculate z<->x compatibility based on angle between normals
-            cos_th = np.cos(np.deg2rad(normal_diff_thresh))
-            dots   = (n_xs @ n_z)
-            mask = dots >= cos_th
+            if normal_diff_thresh is not None:
+                cos_th = np.cos(np.deg2rad(normal_diff_thresh))
+                dots   = (n_xs @ n_z)
+                mask = dots >= cos_th
+            else:
+                mask = np.ones(len(xs), dtype=bool)
             
             if not np.any(mask):
                 continue # Skip this measurement if there are no compatible current values
@@ -839,6 +848,7 @@ def update_weights(
             # Calculate likelihoods and responsibilities
             ls = np.exp(-0.5 * (t**2)) * w
             resp = ls / (ls.sum() + 1e-12)
+            resp *= resp_frac
             
             # Update weights of non-new points x based on Bayesian update using new points z
             w_xs = weights_out[ixs]

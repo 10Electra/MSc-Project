@@ -257,3 +257,123 @@ for i in range(360//c):
 	"version_major" : 1,
 	"version_minor" : 0
 }
+
+### Must
+cam_offset=obj_centre
+look_at = obj_centre
+width: int = 360
+height: int = 240
+fov: float = 70.0
+k: float = 5
+max_normal_angle_deg = None
+N = 1
+
+scans = []
+ccs = []
+a = 45
+c = 60
+rs = (0.35, 1)
+ls = (50, 80)
+for i in range(360//c):
+    r = rs[0] if i%2==0 else rs[1]
+    l = ls[0] if i%2==0 else ls[1]
+    ccs.append(cam_offset + polar2cartesian(r=r, lat=l, long=a+i*c))
+for cc in ccs:
+    object_meshes, object_weights = virtual_mesh_scan(
+        gt_mesh_list,
+        cc,
+        look_at,
+        k=k,
+        max_normal_angle_deg=max_normal_angle_deg,
+        width_px=width,
+        height_px=height,
+        fov=fov,
+        constant_uncertainty    =2e-4,
+        linear_uncertainty      =1e-3,      # rate of uncertainty increase with depth
+        quadrt_uncertainty      =3e-4,      # quadratic uncertainty coefficient
+        constant_perlin_sigma   =2e-4,      # constant perlin noise term
+        linear_perlin_sigma     =1e-3,      # linear depth term
+        quadrt_perlin_sigma     =3e-4,      # quadratic depth term
+        perlin_octaves          =3,
+        seg_scale_std           =1e-4,      # std of per-segment scale noise
+        rot_std                 =1e-4,      # std of global rotation noise
+        trn_std                 =1e-3,      # std of global translation noise
+        grazing_lambda          =1.0,       # sigma multiplier at grazing angles; 0 disables
+        seed                    =None,
+        include_depth_image     =False,
+    )
+{
+	"class_name" : "ViewTrajectory",
+	"interval" : 29,
+	"is_loop" : false,
+	"trajectory" : 
+	[
+		{
+			"boundingbox_max" : [ 0.047320038080215454, 0.030810520052909851, 0.9113733172416687 ],
+			"boundingbox_min" : [ -0.049816854298114777, -0.035761035978794098, 0.72007954120635986 ],
+			"field_of_view" : 60.0,
+			"front" : [ -0.033191651460816318, 0.99835792013933211, 0.046688088077911916 ],
+			"lookat" : [ -0.0031176054006561774, 0.0024845070841953989, 0.81448694588758952 ],
+			"up" : [ -0.0062168156497926993, -0.046919158173194017, 0.99887934396477329 ],
+			"zoom" : 0.69999999999999996
+		}
+	],
+	"version_major" : 1,
+	"version_minor" : 0
+}
+
+h_alpha         = 3,
+r_alpha         = 3,
+nrm_shift_iters = 2,
+nrm_smth_iters  = 1,
+sigma_theta = None,
+normal_diff_thresh = None,
+tau_max = 500_000,
+shift_all = False,
+ball_radius_percentiles = [10, 50, 90],
+bilateral_weight_update = False,
+resp_frac = 0.3,
+
+unc_nrm
+{'recon_to_gt': {'mean': 0.0011748596543343438, 'median': 0.0011631427655090648, 'rms': 0.0013672145291034974, 'p95': 0.0022245632107681028, 'p99': 0.0030069603021518876, 'hausdorff': 0.003883252547403848, 'trimmed_hausdorff_99': 0.0030069603021518876, 'count': 150000}, 'gt_to_recon': {'mean': 0.002135301580451509, 'median': 0.0013156494287154333, 'rms': 0.004215398912667701, 'p95': 0.009413180321591915, 'p99': 0.02121413310553163, 'hausdorff': 0.027464467404210928, 'trimmed_hausdorff_99': 0.02121413310553163, 'count': 150000}, 'fscore': {0.00025: {'tau_m': 0.00025, 'precision': 0.10322666666666666, 'recall': 0.09006, 'fscore': 0.09619487738419619}, 0.0005: {'tau_m': 0.0005, 'precision': 0.21186, 'recall': 0.18522, 'fscore': 0.19764636446056208}, 0.001: {'tau_m': 0.001, 'precision': 0.42586666666666667, 'recall': 0.37522666666666665, 'fscore': 0.3989460981103603}, 0.002: {'tau_m': 0.002, 'precision': 0.88996, 'recall': 0.79812, 'fscore': 0.841541722193261}}, 'normal_error_deg_triangle': {'recon_to_gt': {'mean': 6.660868825333859, 'median': 3.3708631955819044, 'p90': 14.998074281050211, 'p95': 24.560564021714843, 'max': 89.96183578268177, 'count': 150000}, 'gt_to_recon': {'mean': 7.5397895475946655, 'median': 3.5435651943775657, 'p90': 17.88930237528849, 'p95': 31.74782204121157, 'max': 89.85591850023884, 'count': 138453}, 'symmetric': {'mean': 7.082737243270838, 'median': 3.4516673284370056, 'p90': 16.253869309736213, 'p95': 28.099415185740735, 'max': 89.96183578268177, 'count': 288453}}, 'recon_topology': {'boundary_edges': 125, 'connected_components_number': 1, 'edges_number': 33757, 'faces_number': 22463, 'genus': -1, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 23, 'is_mesh_two_manifold': False, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 5, 'number_holes': -1, 'unreferenced_vertices': 0, 'vertices_number': 11277}, 'gt_topology': {'boundary_edges': 24760, 'connected_components_number': 34, 'edges_number': 798812, 'faces_number': 524288, 'genus': -1, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 6, 'is_mesh_two_manifold': False, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 4, 'number_holes': -1, 'unreferenced_vertices': 0, 'vertices_number': 274552}}
+
+van_nrm
+{'recon_to_gt': {'mean': 0.001178799960257924, 'median': 0.0011576086299102326, 'rms': 0.0013762271825575802, 'p95': 0.0022502972346217015, 'p99': 0.0030398821181350237, 'hausdorff': 0.00465158800219722, 'trimmed_hausdorff_99': 0.0030398821181350237, 'count': 150000}, 'gt_to_recon': {'mean': 0.0021430173911966147, 'median': 0.0013114815904133603, 'rms': 0.004221199367903822, 'p95': 0.009483380565997556, 'p99': 0.0212223999807649, 'hausdorff': 0.02743222278461104, 'trimmed_hausdorff_99': 0.0212223999807649, 'count': 150000}, 'fscore': {0.00025: {'tau_m': 0.00025, 'precision': 0.1046, 'recall': 0.08928666666666667, 'fscore': 0.09633860330777431}, 0.0005: {'tau_m': 0.0005, 'precision': 0.21286666666666668, 'recall': 0.18507333333333334, 'fscore': 0.1979994147638114}, 0.001: {'tau_m': 0.001, 'precision': 0.4286466666666667, 'recall': 0.37556, 'fscore': 0.4003511754026743}, 0.002: {'tau_m': 0.002, 'precision': 0.88414, 'recall': 0.79354, 'fscore': 0.8363936574316915}}, 'normal_error_deg_triangle': {'recon_to_gt': {'mean': 6.791995957066899, 'median': 3.4174038237889315, 'p90': 15.417970673879488, 'p95': 24.7928692571228, 'max': 89.91572253889905, 'count': 149977}, 'gt_to_recon': {'mean': 7.678097451258533, 'median': 3.5792727451648108, 'p90': 18.434697903072788, 'p95': 31.881446079730953, 'max': 89.9020356462353, 'count': 138328}, 'symmetric': {'mean': 7.217145182673602, 'median': 3.492852707330817, 'p90': 16.706931864292198, 'p95': 28.37188871740143, 'max': 89.91572253889905, 'count': 288305}}, 'recon_topology': {'boundary_edges': 168, 'connected_components_number': 1, 'edges_number': 31932, 'faces_number': 21232, 'genus': -1, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 63, 'is_mesh_two_manifold': False, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 11, 'number_holes': -1, 'unreferenced_vertices': 0, 'vertices_number': 10672}, 'gt_topology': {'boundary_edges': 24760, 'connected_components_number': 34, 'edges_number': 798812, 'faces_number': 524288, 'genus': -1, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 6, 'is_mesh_two_manifold': False, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 4, 'number_holes': -1, 'unreferenced_vertices': 0, 'vertices_number': 274552}}
+
+unc_nonrm
+{'recon_to_gt': {'mean': 0.001282953287085322, 'median': 0.0011964765317182269, 'rms': 0.0015476564719400874, 'p95': 0.0028249675401110577, 'p99': 0.003843470795025093, 'hausdorff': 0.006353819102549737, 'trimmed_hausdorff_99': 0.003843470795025093, 'count': 150000}, 'gt_to_recon': {'mean': 0.0022959903451740932, 'median': 0.0014460994683946605, 'rms': 0.004252110199480634, 'p95': 0.00885398617256253, 'p99': 0.020942719441454892, 'hausdorff': 0.02739612191941918, 'trimmed_hausdorff_99': 0.020942719441454892, 'count': 150000}, 'fscore': {0.00025: {'tau_m': 0.00025, 'precision': 0.10442666666666667, 'recall': 0.08684666666666667, 'fscore': 0.09482877464477826}, 0.0005: {'tau_m': 0.0005, 'precision': 0.21724666666666667, 'recall': 0.18261333333333332, 'fscore': 0.19843014032689218}, 0.001: {'tau_m': 0.001, 'precision': 0.4248733333333333, 'recall': 0.3602, 'fscore': 0.3898728135800478}, 0.002: {'tau_m': 0.002, 'precision': 0.8238333333333333, 'recall': 0.7129866666666667, 'fscore': 0.764412464989032}}, 'normal_error_deg_triangle': {'recon_to_gt': {'mean': 7.360824581290267, 'median': 3.9871063111627105, 'p90': 16.791393959662376, 'p95': 25.446422096355402, 'max': 89.77603578691746, 'count': 148916}, 'gt_to_recon': {'mean': 8.357097119557665, 'median': 4.244476808414578, 'p90': 19.694543913447536, 'p95': 32.16491360287621, 'max': 88.5499659844471, 'count': 135227}, 'symmetric': {'mean': 7.834962415170692, 'median': 4.105021203810804, 'p90': 17.994157372840657, 'p95': 28.342742221838428, 'max': 89.77603578691746, 'count': 284143}}, 'recon_topology': {'boundary_edges': 120, 'connected_components_number': 1, 'edges_number': 33075, 'faces_number': 22010, 'genus': -1, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 42, 'is_mesh_two_manifold': False, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 8, 'number_holes': -1, 'unreferenced_vertices': 0, 'vertices_number': 11052}, 'gt_topology': {'boundary_edges': 24760, 'connected_components_number': 34, 'edges_number': 798812, 'faces_number': 524288, 'genus': -1, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 6, 'is_mesh_two_manifold': False, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 4, 'number_holes': -1, 'unreferenced_vertices': 0, 'vertices_number': 274552}}
+
+tsdf lo
+{'recon_to_gt': {'mean': 0.0008608558495049874, 'median': 0.0006043628742518226, 'rms': 0.0012219968135856014, 'p95': 0.003094961404851794, 'p99': 0.003831464758433489, 'hausdorff': 0.005013812281476543, 'trimmed_hausdorff_99': 0.003831464758433489, 'count': 150000}, 'gt_to_recon': {'mean': 0.0015286045352178679, 'median': 0.0005717482220118641, 'rms': 0.003818723227303796, 'p95': 0.008934345982735218, 'p99': 0.01971476026875042, 'hausdorff': 0.02533332042935994, 'trimmed_hausdorff_99': 0.01971476026875042, 'count': 150000}, 'fscore': {0.00025: {'tau_m': 0.00025, 'precision': 0.2275, 'recall': 0.2343, 'fscore': 0.2308499350368125}, 0.0005: {'tau_m': 0.0005, 'precision': 0.42911333333333335, 'recall': 0.44694666666666666, 'fscore': 0.4378484897279993}, 0.001: {'tau_m': 0.001, 'precision': 0.7161666666666666, 'recall': 0.7410533333333333, 'fscore': 0.728397490503226}, 0.002: {'tau_m': 0.002, 'precision': 0.9024333333333333, 'recall': 0.9043266666666666, 'fscore': 0.9033790079725278}}, 'normal_error_deg_triangle': {'recon_to_gt': {'mean': 20.604885914288054, 'median': 13.947188450885248, 'p90': 51.13933163446602, 'p95': 68.84294834930868, 'max': 89.99366266665567, 'count': 149183}, 'gt_to_recon': {'mean': 18.066335679600524, 'median': 13.009937688769462, 'p90': 38.52568784938259, 'p95': 55.080024298390455, 'max': 90.0, 'count': 138626}, 'symmetric': {'mean': 19.382168539800826, 'median': 13.489026509754652, 'p90': 44.19016690688082, 'p95': 63.66340495673789, 'max': 90.0, 'count': 287809}}, 'recon_topology': {'boundary_edges': 392, 'connected_components_number': 22, 'edges_number': 42478, 'faces_number': 28188, 'genus': 38, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 0, 'is_mesh_two_manifold': True, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 0, 'number_holes': 21, 'unreferenced_vertices': 0, 'vertices_number': 14237}, 'gt_topology': {'boundary_edges': 24760, 'connected_components_number': 34, 'edges_number': 798812, 'faces_number': 524288, 'genus': -1, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 6, 'is_mesh_two_manifold': False, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 4, 'number_holes': -1, 'unreferenced_vertices': 0, 'vertices_number': 274552}}
+
+tsdf lo sm
+{'recon_to_gt': {'mean': 0.0007664869548996977, 'median': 0.0005716006305281456, 'rms': 0.0010404162534423853, 'p95': 0.0022915422971915814, 'p99': 0.0033780913539373583, 'hausdorff': 0.004345794558647351, 'trimmed_hausdorff_99': 0.0033780913539373583, 'count': 150000}, 'gt_to_recon': {'mean': 0.0017054917661442305, 'median': 0.0006474463481028238, 'rms': 0.00404359916249014, 'p95': 0.00973474015612102, 'p99': 0.02040833252659408, 'hausdorff': 0.025847897495749936, 'trimmed_hausdorff_99': 0.02040833252659408, 'count': 150000}, 'fscore': {0.00025: {'tau_m': 0.00025, 'precision': 0.21775333333333333, 'recall': 0.19558666666666666, 'fscore': 0.20607562114589548}, 0.0005: {'tau_m': 0.0005, 'precision': 0.44602, 'recall': 0.40166666666666667, 'fscore': 0.4226829882110528}, 0.001: {'tau_m': 0.001, 'precision': 0.7451133333333333, 'recall': 0.6817733333333333, 'fscore': 0.7120374909165097}, 0.002: {'tau_m': 0.002, 'precision': 0.9370333333333334, 'recall': 0.8799933333333333, 'fscore': 0.9076180350805101}}, 'normal_error_deg_triangle': {'recon_to_gt': {'mean': 10.311537910825484, 'median': 5.899005236023908, 'p90': 24.06673938696735, 'p95': 35.86525402325274, 'max': 89.96465407869483, 'count': 149908}, 'gt_to_recon': {'mean': 10.442947100152864, 'median': 5.946361436909419, 'p90': 24.0137165025264, 'p95': 35.25148492138951, 'max': 90.0, 'count': 137353}, 'symmetric': {'mean': 10.374370827168752, 'median': 5.920260090203635, 'p90': 24.046300894321483, 'p95': 35.59630766305795, 'max': 90.0, 'count': 287261}}, 'recon_topology': {'boundary_edges': 392, 'connected_components_number': 22, 'edges_number': 42478, 'faces_number': 28188, 'genus': 38, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 0, 'is_mesh_two_manifold': True, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 0, 'number_holes': 21, 'unreferenced_vertices': 0, 'vertices_number': 14237}, 'gt_topology': {'boundary_edges': 24760, 'connected_components_number': 34, 'edges_number': 798812, 'faces_number': 524288, 'genus': -1, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 6, 'is_mesh_two_manifold': False, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 4, 'number_holes': -1, 'unreferenced_vertices': 0, 'vertices_number': 274552}}
+
+tsdf hi
+{'recon_to_gt': {'mean': 0.0011834525378313667, 'median': 0.0007888486692290389, 'rms': 0.0016245734697727086, 'p95': 0.003589221437393534, 'p99': 0.004314214838795581, 'hausdorff': 0.004984187107782277, 'trimmed_hausdorff_99': 0.004314214838795581, 'count': 150000}, 'gt_to_recon': {'mean': 0.0014192314397015037, 'median': 0.0005025347886563891, 'rms': 0.00365355406218693, 'p95': 0.008369692823293006, 'p99': 0.01900580682101962, 'hausdorff': 0.02506879589093513, 'trimmed_hausdorff_99': 0.01900580682101962, 'count': 150000}, 'fscore': {0.00025: {'tau_m': 0.00025, 'precision': 0.18455333333333335, 'recall': 0.26598666666666665, 'fscore': 0.21791062261089164}, 0.0005: {'tau_m': 0.0005, 'precision': 0.35247333333333336, 'recall': 0.49803333333333333, 'fscore': 0.4127973971070839}, 0.001: {'tau_m': 0.001, 'precision': 0.5826, 'recall': 0.77636, 'fscore': 0.6656668864425738}, 0.002: {'tau_m': 0.002, 'precision': 0.7972533333333334, 'recall': 0.91212, 'fscore': 0.8508272549004313}}, 'normal_error_deg_triangle': {'recon_to_gt': {'mean': 30.548807668802716, 'median': 25.172730329470397, 'p90': 64.84502769165297, 'p95': 77.54242650234958, 'max': 89.99958149155106, 'count': 146833}, 'gt_to_recon': {'mean': 25.811757206282266, 'median': 20.818208131884454, 'p90': 52.80056920111992, 'p95': 71.60594087303937, 'max': 89.99952915416641, 'count': 139175}, 'symmetric': {'mean': 28.243700825213434, 'median': 22.83051012586612, 'p90': 59.801394255892504, 'p95': 75.47912215435814, 'max': 89.99958149155106, 'count': 286008}}, 'recon_topology': {'boundary_edges': 1229, 'connected_components_number': 214, 'edges_number': 291193, 'faces_number': 193719, 'genus': -1, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 3, 'is_mesh_two_manifold': False, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 1, 'number_holes': -1, 'unreferenced_vertices': 0, 'vertices_number': 96442}, 'gt_topology': {'boundary_edges': 24760, 'connected_components_number': 34, 'edges_number': 798812, 'faces_number': 524288, 'genus': -1, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 6, 'is_mesh_two_manifold': False, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 4, 'number_holes': -1, 'unreferenced_vertices': 0, 'vertices_number': 274552}}
+
+tsdf hi sm
+{'recon_to_gt': {'mean': 0.0011122167091761846, 'median': 0.0007257485592908369, 'rms': 0.0015496631621419014, 'p95': 0.0035535577037880037, 'p99': 0.0041375111596545595, 'hausdorff': 0.004703952119260751, 'trimmed_hausdorff_99': 0.0041375111596545595, 'count': 150000}, 'gt_to_recon': {'mean': 0.0015001299626536868, 'median': 0.0005756616151867998, 'rms': 0.0037184266838952134, 'p95': 0.00853440775193787, 'p99': 0.019280002614545523, 'hausdorff': 0.025371043246496614, 'trimmed_hausdorff_99': 0.019280002614545523, 'count': 150000}, 'fscore': {0.00025: {'tau_m': 0.00025, 'precision': 0.18948666666666666, 'recall': 0.22415333333333334, 'fscore': 0.20536731435816438}, 0.0005: {'tau_m': 0.0005, 'precision': 0.37512, 'recall': 0.44499333333333335, 'fscore': 0.4070800764122032}, 0.001: {'tau_m': 0.001, 'precision': 0.61752, 'recall': 0.73352, 'fscore': 0.6705401326385599}, 0.002: {'tau_m': 0.002, 'precision': 0.8222866666666667, 'recall': 0.90714, 'fscore': 0.8626316931237328}}, 'normal_error_deg_triangle': {'recon_to_gt': {'mean': 17.610539239405185, 'median': 11.481946302482953, 'p90': 41.788697366785705, 'p95': 59.23027555112158, 'max': 89.99501673400094, 'count': 147670}, 'gt_to_recon': {'mean': 16.01854861094305, 'median': 10.31549246166262, 'p90': 35.814485282487254, 'p95': 54.33656094192172, 'max': 90.0, 'count': 138785}, 'symmetric': {'mean': 16.839233382041492, 'median': 10.895786201881894, 'p90': 39.06494465815975, 'p95': 57.33083988683372, 'max': 90.0, 'count': 286455}}, 'recon_topology': {'boundary_edges': 1229, 'connected_components_number': 214, 'edges_number': 291193, 'faces_number': 193719, 'genus': -1, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 3, 'is_mesh_two_manifold': False, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 1, 'number_holes': -1, 'unreferenced_vertices': 0, 'vertices_number': 96442}, 'gt_topology': {'boundary_edges': 24760, 'connected_components_number': 34, 'edges_number': 798812, 'faces_number': 524288, 'genus': -1, 'incident_faces_on_non_two_manifold_edges': 0, 'incident_faces_on_non_two_manifold_vertices': 6, 'is_mesh_two_manifold': False, 'non_two_manifold_edges': 0, 'non_two_manifold_vertices': 4, 'number_holes': -1, 'unreferenced_vertices': 0, 'vertices_number': 274552}}
+
+
+
+unc nrm
+{'mse': 0.005598970613081594, 'iou': 0.9596285094706302}
+
+van nrm
+{'mse': 0.005642056479972954, 'iou': 0.9594091161544601}
+
+unc nonorm
+{'mse': 0.005896224758166675, 'iou': 0.937123829754161}
+
+tsdf lo
+{'mse': 0.004088319433641242, 'iou': 0.9711199871352294}
+
+tsdf lo smth
+{'mse': 0.00644710582133027, 'iou': 0.9572946071768417}
+
+tsdf hi
+{'mse': 0.002875181111001981, 'iou': 0.9727542761664726}
+
+tsdf hi smth
+{'mse': 0.003802924039568613, 'iou': 0.973295019912828}
