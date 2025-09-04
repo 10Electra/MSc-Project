@@ -282,18 +282,18 @@ def smooth_overlap_set_cached(
 
 
 def normal_shift_smooth(
-    points:         np.ndarray,                 # (N,3)
-    normals:        np.ndarray,                 # (N,3)
-    weights:        Optional[np.ndarray],       # (N,) precision for each point, or None
-    local_spacing:  np.ndarray,                 # (N,) local sampling spacing
-    local_density:  np.ndarray,                 # (N,) local sampling density
-    overlap_idx:    np.ndarray,                 # (L,) indices to be updated
-    nbr_cache:      list[np.ndarray],           # (N,K)
-    r_alpha:        float = 2.0,
-    h_alpha:        float = 2.0,
-    sigma_theta:    float = 0.2,                # Normal angle difference std (related to sharpness)
-    normal_diff_thresh: float = 45.0,           # degrees; hard front-facing gate
-    shift_all:      bool = False,               # All pts or just overlap
+    points:             np.ndarray,                 # (N,3)
+    normals:            np.ndarray,                 # (N,3)
+    weights:            Optional[np.ndarray],       # (N,) precision for each point, or None
+    local_spacing:      np.ndarray,                 # (N,) local sampling spacing
+    local_density:      np.ndarray,                 # (N,) local sampling density
+    overlap_idx:        np.ndarray,                 # (L,) indices to be updated
+    nbr_cache:          list[np.ndarray],           # (N,K)
+    r_alpha:            float = 2.0,
+    h_alpha:            float = 2.0,
+    sigma_theta:        float | None = None,        # Normal angle difference std (related to sharpness)
+    normal_diff_thresh: float | None = None,        # degrees; hard front-facing gate
+    shift_all:          bool = False,               # All pts or just overlap
 ) -> np.ndarray:
     """
     One pass of along-normal shifting. Assumes:
@@ -301,6 +301,7 @@ def normal_shift_smooth(
       - nbr_cache[i] already lies inside the cylinder (radius r_alpha*D_i, height 2*h_alpha*D_i),
       - weights are precisions (e.g. 1/covariance). If None, all neighbours are treated equally
         with respect to the 'weights' term (i.e. that factor is omitted).
+      - If either sigma_theta or normal_diff_thresh is None, angle-based filtering will not be applied.
     Returns: updated (N,3) points array.
     """
 
@@ -316,8 +317,11 @@ def normal_shift_smooth(
     new_pts = points.copy()
     shift_idx = overlap_idx if not shift_all else range(len(points))
 
-    cos_thr = np.cos(np.deg2rad(normal_diff_thresh))
-    sigma_c = 0.5 * (sigma_theta ** 2)  # =~ mapping from angle sigma to cosine sigma
+    if sigma_theta is None or normal_diff_thresh is None:
+        cos_thr, sigma_c = None, None
+    else:
+        cos_thr = np.cos(np.deg2rad(normal_diff_thresh))
+        sigma_c = 0.5 * (sigma_theta ** 2)  # =~ mapping from angle sigma to cosine sigma
 
     for i in shift_idx:
         p = points[i]
@@ -333,7 +337,7 @@ def normal_shift_smooth(
 
         # Normal similarity
         cos_theta = np.einsum('ij,j->i', normals_nbr, n)
-        if weights is not None:
+        if cos_thr is not None:
             mask_face = cos_theta >= cos_thr
         else:
             mask_face = np.ones_like(cos_theta, dtype=bool)
@@ -361,7 +365,10 @@ def normal_shift_smooth(
         S = r2 / (2.0 * sigma_r * sigma_r) + h2 / (2.0 * sigma_h * sigma_h)
         w_spatial = np.exp(-S)
 
-        w_normal = np.exp(-(1.0 - cos_theta) / (2.0 * sigma_c))
+        if sigma_c is not None:
+            w_normal = np.exp(-(1.0 - cos_theta) / (2.0 * sigma_c))
+        else:
+            w_normal = np.ones_like(w_spatial)
 
         d_rho = local_density[i] - local_density[nbr][mask_face]
         sigma_rho = np.max(np.abs(d_rho)) + 1e-12
@@ -371,7 +378,7 @@ def normal_shift_smooth(
         if weights is not None:
             w = weights_nbr * w_spatial * w_density * w_normal
         else:
-            w = w_spatial * w_density
+            w = w_spatial * w_density * w_normal
             
         w_sum = w.sum()
         if w_sum < 1e-12:

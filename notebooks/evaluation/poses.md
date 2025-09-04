@@ -210,3 +210,50 @@ sdf_unc
 
 sdf_van
 431616
+
+## 2 Noise
+
+### Drill
+width: int = 360
+height: int = 240
+fov: float = 70.0
+k: float = 5
+
+a = 45
+c = 45
+rs = (0.35, 0.5, 1.0)
+ls = (90,90)
+for i in range(360//c):
+    r = rs[i%len(rs)]
+    l = ls[i%len(ls)]
+        constant_uncertainty    =2e-5,
+        linear_uncertainty      =1e-5,      # rate of uncertainty increase with depth
+        quadrt_uncertainty      =3e-3,      # quadratic uncertainty coefficient
+        constant_perlin_sigma   =2e-5,      # constant perlin noise term
+        linear_perlin_sigma     =1e-5,      # linear depth term
+        quadrt_perlin_sigma     =3e-3,      # quadratic depth term
+        perlin_octaves          =5,
+        seg_scale_std           =1e-8,#4,      # std of per-segment scale noise
+        rot_std                 =1e-8,#4,      # std of global rotation noise
+        trn_std                 =5e-8,#3,      # std of global translation noise
+        grazing_lambda          =2.0,       # sigma multiplier at grazing angles; 0 disables
+
+{
+	"class_name" : "ViewTrajectory",
+	"interval" : 29,
+	"is_loop" : false,
+	"trajectory" : 
+	[
+		{
+			"boundingbox_max" : [ -0.047563224652026517, 0.046038004086583227, 0.90710885961665622 ],
+			"boundingbox_min" : [ -0.18797298036669985, -0.10495374720145056, 0.71914974875969284 ],
+			"field_of_view" : 60.0,
+			"front" : [ -0.74561220115033233, -0.65201208009554645, 0.13763245585702225 ],
+			"lookat" : [ -0.11946817567763685, -0.027750299939340785, 0.81205313332433826 ],
+			"up" : [ 0.10800519023380389, 0.085565323137221094, 0.99046123314291457 ],
+			"zoom" : 0.65999999999999992
+		}
+	],
+	"version_major" : 1,
+	"version_minor" : 0
+}
