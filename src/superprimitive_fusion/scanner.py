@@ -123,7 +123,7 @@ def virtual_scan(
     t_hit = ans["t_hit"].numpy()
 
     # Intersection metadata (gometry id + triangle id + barycentric uv + normals)
-    geom_ids_img = ans["geometry_ids"].numpy().astype(np.int16)
+    geom_ids_img = ans["geometry_ids"].numpy()
     prim_ids = ans["primitive_ids"].numpy().astype(np.int32)
     bary_uv = ans.get("primitive_uvs", None).numpy()
     normals = ans["primitive_normals"].numpy()
@@ -136,7 +136,7 @@ def virtual_scan(
     id_to_idx[o3d_geom_ids] = np.arange(o3d_geom_ids.size, dtype=np.int32)
 
     # Remap the (H, W) image of geometry_ids to [0..len(meshlist)-1], with -1 for misses
-    invalid = o3d.t.geometry.RaycastingScene.INVALID_ID
+    invalid = np.array(o3d.t.geometry.RaycastingScene.INVALID_ID, dtype=geom_ids_img.dtype)
     hit_mask = geom_ids_img != invalid
 
     mesh_idx_img = np.full(geom_ids_img.shape, -1, dtype=np.int32)
@@ -174,7 +174,7 @@ def triangulate_rgbd_grid_grouped(verts, valid, z, obj_id,
     Output: list of (Ni,3) int32 arrays. Index i corresponds to object_id == i.
             Unknown id == -1 is skipped.
     """
-    # --- reshape ---
+    # reshape
     if verts.ndim == 2:
         N = verts.shape[0]
         H = int(np.round(np.sqrt(N)))
@@ -187,7 +187,7 @@ def triangulate_rgbd_grid_grouped(verts, valid, z, obj_id,
     z_img = z.reshape(H, W)
     obj_id = obj_id.reshape(H, W).astype(np.int32)
 
-    # --- disparity + robust thresholds ---
+    # disparity + robust thresholds
     disp = np.zeros_like(z_img, dtype=np.float32)
     m = valid_img & np.isfinite(z_img) & (z_img > 0)
     disp[m] = 1.0 / z_img[m]
@@ -215,19 +215,19 @@ def triangulate_rgbd_grid_grouped(verts, valid, z, obj_id,
         base_thr = np.inf
     thr_x, thr_y, thr_d = base_thr, base_thr, base_thr * np.sqrt(2)
 
-    # --- object gates (unknown == -1 → cut) ---
+    # object gates (unknown == -1 -> cut)
     same_x  = (obj_id[:, 1:] == obj_id[:, :-1]) & (obj_id[:, 1:] >= 0)
     same_y  = (obj_id[1:, :] == obj_id[:-1, :]) & (obj_id[1:, :] >= 0)
     same_d1 = (obj_id[:-1, :-1] == obj_id[1:, 1:]) & (obj_id[:-1, :-1] >= 0)
     same_d2 = (obj_id[:-1, 1:]  == obj_id[1:, :-1]) & (obj_id[:-1, 1:]  >= 0)
 
-    # --- base edge validity ---
+    # base edge validity
     good_x  = mask_x  & same_x  & (dx  <= thr_x)
     good_y  = mask_y  & same_y  & (dy  <= thr_y)
     good_d1 = mask_d1 & same_d1 & (dd1 <= thr_d)
     good_d2 = mask_d2 & same_d2 & (dd2 <= thr_d)
 
-    # --- optional normal-angle gate ---
+    # normal-angle gate
     if (normals is not None) and (max_normal_angle_deg is not None):
         n = normals.reshape(H, W, 3).astype(np.float32)
         n_norm = np.linalg.norm(n, axis=-1, keepdims=True)
@@ -250,7 +250,7 @@ def triangulate_rgbd_grid_grouped(verts, valid, z, obj_id,
         good_d1 &= n_ok_d1 & (dot_d1 >= cos_max)
         good_d2 &= n_ok_d2 & (dot_d2 >= cos_max)
 
-    # --- per-quad indices ---
+    # per-quad indices
     id_img = np.arange(H * W, dtype=np.int32).reshape(H, W)
     tl = id_img[:-1, :-1]; tr = id_img[:-1, 1:]
     bl = id_img[1:, :-1];  br = id_img[1:, 1:]
@@ -268,7 +268,7 @@ def triangulate_rgbd_grid_grouped(verts, valid, z, obj_id,
     C = e_top & e_left & d2             # (tl,tr,bl)
     D = e_right & e_bottom & d2         # (tr,br,bl)
 
-    # orientation selection (prefer keeping more tris; tie → shorter 3D diagonal)
+    # orientation selection (prefer keeping more tris; tie -> shorter 3D diagonal)
     count1 = A.astype(np.uint8) + B.astype(np.uint8)
     count2 = C.astype(np.uint8) + D.astype(np.uint8)
 
@@ -287,7 +287,7 @@ def triangulate_rgbd_grid_grouped(verts, valid, z, obj_id,
     A &= prefer_d1; B &= prefer_d1
     C &= ~prefer_d1; D &= ~prefer_d1
 
-    # --- pack triangles + labels (label from any vertex in the tri; they’re equal by construction) ---
+    # pack triangles + labels
     lab_tl = obj_id[:-1, :-1]
     lab_tr = obj_id[:-1, 1:]
     # lab_bl = obj_id[1:, :-1]
@@ -300,10 +300,10 @@ def triangulate_rgbd_grid_grouped(verts, valid, z, obj_id,
             tris_list.append(np.stack([i0[mask], i1[mask], i2[mask]], axis=1))
             labels_list.append(lab_grid[mask].astype(np.int32))
 
-    pack(A, tl, br, tr, lab_tl)  # (tl,br,tr) → label from tl
-    pack(B, tl, bl, br, lab_tl)  # (tl,bl,br) → label from tl
-    pack(C, tl, bl, tr, lab_tl)  # (tl,bl,tr) → label from tl
-    pack(D, tr, bl, br, lab_tr)  # (tr,bl,br) → label from tr
+    pack(A, tl, br, tr, lab_tl)  # (tl,br,tr) -> label from tl
+    pack(B, tl, bl, br, lab_tl)  # (tl,bl,br) -> label from tl
+    pack(C, tl, bl, tr, lab_tl)  # (tl,bl,tr) -> label from tl
+    pack(D, tr, bl, br, lab_tr)  # (tr,bl,br) -> label from tr
 
     if not tris_list:
         # no triangles at all; build empty list sized by max obj id

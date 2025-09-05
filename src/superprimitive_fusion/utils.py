@@ -451,7 +451,7 @@ def distinct_colours(n: int, *, s: float = 0.9, v: float = 0.9) -> np.ndarray:
 
     return rgb
 
-def plot_images(images, max_cols=5, titles=None, per_img_width=3, cmap=None, cbar_cols=None, cbar_kw=None):
+def plot_images(images, max_cols=5, titles=None, titlesize=9, per_img_width=3, cmap=None, cbar_cols=None, cbar_kw=None):
     from mpl_toolkits.axes_grid1 import make_axes_locatable
     n = len(images)
     h_to_w = images[0].shape[0] / images[0].shape[1]
@@ -466,7 +466,7 @@ def plot_images(images, max_cols=5, titles=None, per_img_width=3, cmap=None, cba
         im = ax.imshow(arr, cmap=(cmap if arr.ndim == 2 else None))
         ax.set_xticks([]); ax.set_yticks([])
         for s in ax.spines.values(): s.set_visible(False)
-        if titles and i < len(titles) and titles[i]: ax.set_title(titles[i], fontsize=9, pad=2)
+        if titles and i < len(titles) and titles[i]: ax.set_title(titles[i], fontsize=titlesize, pad=2)
         if arr.ndim == 2 and cbar_cols and (i % cols) in cbar_cols:
             cax = make_axes_locatable(ax).append_axes("right", size="5%", pad=0.02)
             fig.colorbar(im, cax=cax, **(cbar_kw or {}))
