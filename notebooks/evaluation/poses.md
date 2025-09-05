@@ -1,3 +1,8 @@
+def print_useful_results(d:dict):
+    d2 = {'re2gt_med':d['recon_to_gt']['median'], 'gt2re_med':d['gt_to_recon']['median'], 're2gt_hausdrf':d['recon_to_gt']['trimmed_hausdorff_99']}
+    if 'normal_error_deg_triangle' in d.keys():
+        d2['nrm'] = d['normal_error_deg_triangle']['symmetric']['median']
+    print(d2)
 
 ## 1 No Noise
 
