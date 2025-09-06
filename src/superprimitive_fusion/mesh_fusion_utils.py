@@ -840,6 +840,9 @@ def update_weights(
             if not np.any(keep):
                 continue
             
+            ixs = ixs[keep]
+            t   = t[keep]
+            
             w = np.ones_like(t)
             if huber_delta is not None:
                 far = t > huber_delta
