@@ -40,6 +40,7 @@ def fuse_meshes(
     bilateral_weight_update: bool = False,
     density_term: bool = True,
     resp_frac: float = 1.0,
+    return_overlap_vertex_count=False,
 ) -> Tuple[o3d.geometry.TriangleMesh, Optional[np.ndarray]]:
     """Fuses two registered open3d triangle meshes.
 
@@ -118,6 +119,7 @@ def fuse_meshes(
     overlap_idx, overlap_mask = compute_overlap_set_cached(scan_ids, nbr_cache)
     overlap_idx, overlap_mask = smooth_overlap_set_cached(overlap_mask, nbr_cache)
     overlap_idx, overlap_mask = smooth_overlap_set_cached(overlap_mask, nbr_cache, p_thresh=1)
+    overlap_vertex_count = len(overlap_idx)
 
     # ---------------------------------------------------------------------
     # Find overlap boundary edges
@@ -323,4 +325,4 @@ def fuse_meshes(
     fused_mesh.remove_non_manifold_edges()
 
     fused_mesh.compute_vertex_normals()
-    return fused_mesh, W0
+    return fused_mesh, W0, overlap_vertex_count
