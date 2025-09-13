@@ -611,7 +611,8 @@ def virtual_mesh_scan(
     grazing_lambda:         float=1.0,      # sigma multiplier at grazing angles; 0 disables
     seed = None,
     include_depth_image:    bool=False,
-) -> tuple[list[o3d.geometry.TriangleMesh], list[np.ndarray]]|tuple[list[o3d.geometry.TriangleMesh], list[np.ndarray], dict]:
+    generate_mesh:bool=True,
+) -> dict | tuple[list[o3d.geometry.TriangleMesh], list[np.ndarray]]|tuple[list[o3d.geometry.TriangleMesh], list[np.ndarray], dict]:
     """Easy call to virtual_scan() and mesh_depth_mage()"""
 
     cam_centre_np = np.asarray(cam_centre) if isinstance(cam_centre, tuple) else cam_centre
@@ -665,16 +666,20 @@ def virtual_mesh_scan(
     depth = ((verts_noised - cam_centre_np) @ L).clip(min=0.0)
     depth_image = {'depth':depth, 'rgb':scan_result['vcols'], 'segmt':scan_result['segmt'], 'E':E, 'K_t':K}
 
-    object_meshes, object_weights = mesh_depth_image(
-        points=verts_noised,
-        weights=weights,
-        vertex_colours=scan_result['vcols'],
-        z=depth,
-        segmentation=scan_result['segmt'],
-        normals=scan_result['norms'],
-        k=k,
-        max_normal_angle_deg=max_normal_angle_deg,
-    )
+    if generate_mesh:
+        object_meshes, object_weights = mesh_depth_image(
+            points=verts_noised,
+            weights=weights,
+            vertex_colours=scan_result['vcols'],
+            z=depth,
+            segmentation=scan_result['segmt'],
+            normals=scan_result['norms'],
+            k=k,
+            max_normal_angle_deg=max_normal_angle_deg,
+        )
+    else:
+        assert include_depth_image, 'why no mesh and no depth image - what do you want?'
+        return depth_image
     if include_depth_image:
         return object_meshes, object_weights, depth_image
     return object_meshes, object_weights
