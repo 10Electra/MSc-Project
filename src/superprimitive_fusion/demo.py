@@ -4,10 +4,17 @@ import math
 import torch
 import shutil
 import numpy as np
+import open3d as o3d
 import pyrealsense2 as rs
 from natsort import natsort
+import matplotlib.pyplot as plt
 from typing import Optional, Tuple, List
 from vggt.utils.load_fn import load_and_preprocess_images
+from vggt.utils.geometry import unproject_depth_map_to_point_map
+
+from superprimitive_fusion.scanner import (
+    triangulate_rgbd_grid_grouped,
+)
 
 def detect_yellow(
     frame_rgb: np.ndarray,
@@ -79,19 +86,58 @@ def segment_video(predictor, jpg_video_path:str, frame_1_seg_c:tuple, ann_frame_
             for i, out_obj_id in enumerate(out_obj_ids)
         }
 
-    return video_segments
+    masks = np.array([video_segments[i][1][0,...] for i in range(len(video_segments))])
 
-def predict_geometry(model, jpg_video_path:str, image_names:None|list[str], device=torch.device("cuda")):
+    return masks
+
+def predict_geometry(model, jpg_video_path:str, image_names:None|list[str], kf_idx:None|list[int], device=torch.device("cuda")):
     if image_names is None:
         image_names = [fname for fname in os.listdir(jpg_video_path) if fname.endswith('.jpg')]
         image_names = natsort.natsorted(image_names)
-    images = load_and_preprocess_images([jpg_video_path+img_name for img_name in image_names]).to(device)
+    kf_image_names = image_names if kf_idx is None else [image_names[i] for i in kf_idx]
+    images = load_and_preprocess_images([jpg_video_path+img_name for img_name in kf_image_names]).to(device)
     with torch.no_grad():
         predictions = model(images)
     depth = predictions['depth'].cpu().numpy()[0]
     world_points = predictions['world_points'].cpu().numpy()[0]
     world_points_conf = predictions['world_points_conf'].cpu().numpy()[0]
     return world_points, world_points_conf, depth
+
+
+def predict_geometry2(model, jpg_video_path: str,
+                     image_names: None|list[str],
+                     kf_idx: None|list[int],
+                     device=torch.device("cuda")):
+    # 1) Deterministic ordering & safe path join
+    if image_names is None:
+        image_names = sorted([f for f in os.listdir(jpg_video_path) if f.lower().endswith(".jpg")])
+    kf_image_names = image_names if kf_idx is None else [image_names[i] for i in kf_idx]
+    paths = [os.path.join(jpg_video_path, n) for n in kf_image_names]
+
+    images = load_and_preprocess_images(paths).to(device)
+
+    # 2) Match demo’s AMP settings (for numerical parity)
+    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    with torch.no_grad(), torch.cuda.amp.autocast(dtype=dtype):
+        predictions = model(images)
+
+    # Shapes: depth (S,H,W,1), world_points (S,H,W,3), conf (S,H,W)
+    depth = predictions["depth"].cpu().numpy()                   # keep ALL frames
+    conf  = predictions["world_points_conf"].cpu().numpy()
+
+    # 3) Prefer depth→points using predicted cameras (more accurate)
+    wp_from_depth = unproject_depth_map_to_point_map(
+        predictions["depth"], predictions["extrinsic"], predictions["intrinsic"]
+    ).cpu().numpy()                                              # (S,H,W,3) :contentReference[oaicite:3]{index=3}
+
+    # 4) Confidence filtering like the Space (e.g., drop lowest 50%)
+    thr = np.percentile(conf, 50.0)
+    mask = conf >= thr                                          # (S,H,W) boolean
+    points = wp_from_depth[mask]                                # (N,3)
+    conf_kept = conf[mask]                                      # (N,)
+
+    return points, conf_kept, depth
+
 
 def record_realsense_colour(pipeline: rs.pipeline,
                             max_frames: Optional[int],
@@ -240,6 +286,18 @@ def get_frames(res:tuple=(640,480), fps:int=5, max_frames:int=30) -> tuple[list[
         pipeline.stop()
     
     return frames, keyframe_idx
+
+def get_sorted_frames(path_to_directory:str):
+    filenames = os.listdir(path_to_directory)
+    filenames = natsort.natsorted(filenames)
+    
+    # Raise an error if not all images
+    frames = []
+    for filename in filenames:
+        if not filename.endswith('.jpg'):
+            raise FileExistsError('Folder contains more than just images')
+        frames.append(plt.imread(path_to_directory+filename))
+    return frames
 
 def delete_contents(path_to_directory:str):
     filenames = os.listdir(path_to_directory)
@@ -407,3 +465,22 @@ def crop_centre(img,cropx,cropy):
     startx = x//2 - cropx//2
     starty = y//2 - cropy//2    
     return img[starty:starty+cropy, startx:startx+cropx, :]
+
+def get_superprimitive(conf:np.ndarray,
+                       seg:np.ndarray,
+                       depth:np.ndarray,
+                       points:np.ndarray,
+                       rgb:np.ndarray,
+                       conf_thresh:float,
+                       seg_id:int=1,
+                       k:int=10) -> o3d.geometry.TriangleMesh:
+    valid = (conf > conf_thresh) & (seg == seg_id)
+    tris = triangulate_rgbd_grid_grouped(points, valid, depth, np.ones_like(seg), k=k)
+
+    mesh = o3d.geometry.TriangleMesh()
+    mesh.vertices = o3d.utility.Vector3dVector(points.reshape(-1,3))
+    mesh.triangles = o3d.utility.Vector3iVector(tris[1])
+    mesh.vertex_colors = o3d.utility.Vector3dVector(rgb.reshape(-1,3)/255)
+    mesh.remove_unreferenced_vertices()
+    mesh.compute_vertex_normals()
+    return mesh
